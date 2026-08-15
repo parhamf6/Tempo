@@ -225,7 +225,7 @@ bundled sample vault.
 ## 🙏 Credits
 
 This project is based on
-[Minimal Time Tracker](https://github.com/Ellpeck/ObsidianSimpleTimeTracker) by
+[ObsidianSimpleTimeTracker](https://github.com/Ellpeck/ObsidianSimpleTimeTracker) by
 [Ellpeck](https://github.com/Ellpeck), and is licensed under the MIT License.
 
 This version (Tempo) contains substantial modifications, customizations, and
