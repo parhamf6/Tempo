@@ -1,0 +1,10 @@
+{
+  "id": "tempo",
+  "name": "Tempo",
+  "version": "1.0.0",
+  "minAppVersion": "1.13.0",
+  "description": "A modern and minimal multi-purpose time tracker for your notes.",
+  "author": "Parham Forati",
+  "authorUrl": "https://github.com/parhamf6",
+  "isDesktopOnly": false
+}
