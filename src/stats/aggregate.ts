@@ -64,7 +64,13 @@ function buildBuckets(entries: Entry[], start: Moment, end: Moment): StatsBucket
             let total = 0;
             for (const entry of entries)
                 total += durationInRange(entry, bucketStart, clippedEnd);
-            buckets.push({label: bucketStart.format("MMM D"), start: bucketStart.valueOf(), durationMs: total});
+            buckets.push({
+                label: bucketStart.format("MMM D"),
+                start: bucketStart.valueOf(),
+                end: clippedEnd.valueOf(),
+                durationMs: total,
+                leaderboard: buildLeaderboard(entries, bucketStart, clippedEnd)
+            });
             cursor.add(1, "day");
         }
     } else if (spanDays <= 180) {
@@ -76,7 +82,13 @@ function buildBuckets(entries: Entry[], start: Moment, end: Moment): StatsBucket
             let total = 0;
             for (const entry of entries)
                 total += durationInRange(entry, bucketStart, clippedEnd);
-            buckets.push({label: bucketStart.format("MMM D"), start: bucketStart.valueOf(), durationMs: total});
+            buckets.push({
+                label: bucketStart.format("MMM D"),
+                start: bucketStart.valueOf(),
+                end: clippedEnd.valueOf(),
+                durationMs: total,
+                leaderboard: buildLeaderboard(entries, bucketStart, clippedEnd)
+            });
             cursor.add(7, "days");
         }
     } else {
@@ -89,7 +101,13 @@ function buildBuckets(entries: Entry[], start: Moment, end: Moment): StatsBucket
             let total = 0;
             for (const entry of entries)
                 total += durationInRange(entry, clippedStart, clippedEnd);
-            buckets.push({label: bucketStart.format("MMM YYYY"), start: bucketStart.valueOf(), durationMs: total});
+            buckets.push({
+                label: bucketStart.format("MMM YYYY"),
+                start: bucketStart.valueOf(),
+                end: clippedEnd.valueOf(),
+                durationMs: total,
+                leaderboard: buildLeaderboard(entries, clippedStart, clippedEnd)
+            });
             cursor.add(1, "month");
         }
     }
@@ -130,6 +148,24 @@ export function computeStats(entries: Entry[], range: StatsRange, fileCount: num
         totalMs,
         fileCount,
         buckets: buildBuckets(entries, start, end),
+        leaderboard: buildLeaderboard(entries, start, end)
+    };
+}
+
+// Aggregates stats for an explicit period, used when the view is filtered
+// down to a single chart bucket via the drill-down panel.
+export function computeStatsForPeriod(entries: Entry[], startMs: number, endMs: number, fileCount: number): StatsResult {
+    const start = moment(startMs);
+    const end = moment(endMs);
+
+    let totalMs = 0;
+    for (const entry of entries)
+        totalMs += durationInRange(entry, start, end);
+
+    return {
+        totalMs,
+        fileCount,
+        buckets: [],
         leaderboard: buildLeaderboard(entries, start, end)
     };
 }

@@ -12,10 +12,10 @@ import {
 import {TempoSettings} from "../settings";
 import {formatDuration} from "../tracker";
 import {scanEntries} from "./scan";
-import {computeStats} from "./aggregate";
+import {computeStats, computeStatsForPeriod} from "./aggregate";
 import {saveStatsState} from "./state";
 import {buildStatsCsv} from "./export";
-import {StatsBucket, StatsRangeType, StatsResult, StatsSource, StatsState} from "./types";
+import {StatsBucket, StatsLeaderboardRow, StatsRangeType, StatsResult, StatsSource, StatsState} from "./types";
 
 type GetFile = () => string;
 
@@ -47,6 +47,10 @@ export function displayStats(
     let refreshButton: ButtonComponent;
     let refreshing = false;
 
+    // chart drill-down: which bucket is selected and whether the view is filtered to it
+    let selectedKey: number | null = null;
+    let filterActive = false;
+
     const refresh = async (): Promise<void> => {
         if (refreshing)
             return;
@@ -55,7 +59,37 @@ export function displayStats(
         try {
             const scanned = await scanEntries(app, state.sources);
             const result = computeStats(scanned.entries, state.range, scanned.fileCount);
-            renderResults(resultsSection, result, settings, component);
+
+            // drop the selection if it no longer matches a bucket (e.g. range changed)
+            if (selectedKey !== null && !result.buckets.some(b => b.start === selectedKey)) {
+                selectedKey = null;
+                filterActive = false;
+            }
+            const selected = selectedKey !== null
+                ? result.buckets.find(b => b.start === selectedKey) ?? null
+                : null;
+            const filteredResult = selected && filterActive
+                ? computeStatsForPeriod(scanned.entries, selected.start, selected.end, scanned.fileCount)
+                : null;
+
+            renderResults(resultsSection, result, settings, component, {
+                selected,
+                filteredResult,
+                onSelect: (bucket) => {
+                    if (bucket && bucket.start !== selectedKey) {
+                        selectedKey = bucket.start;
+                        filterActive = false;
+                    } else {
+                        selectedKey = null;
+                        filterActive = false;
+                    }
+                    void refresh();
+                },
+                onToggleFilter: () => {
+                    filterActive = !filterActive;
+                    void refresh();
+                }
+            });
         } finally {
             refreshing = false;
             refreshButton?.setDisabled(false);
@@ -368,6 +402,13 @@ function renderRange(container: HTMLElement, state: StatsState, onChange: () => 
 // Results: summary cards + chart + leaderboard
 // ---------------------------------------------------------------------------
 
+interface StatsDayView {
+    selected: StatsBucket | null;
+    filteredResult: StatsResult | null;
+    onSelect: (bucket: StatsBucket | null) => void;
+    onToggleFilter: () => void;
+}
+
 function addSummaryCard(container: HTMLElement, icon: string, value: string, label: string): void {
     const card = container.createDiv({cls: "tempo-timer"});
     setIcon(card.createSpan({cls: "tempo-timer-icon"}), icon);
@@ -375,38 +416,78 @@ function addSummaryCard(container: HTMLElement, icon: string, value: string, lab
     card.createSpan({cls: "tempo-timer-label", text: label});
 }
 
-function renderResults(container: HTMLElement, result: StatsResult, settings: TempoSettings, component: MarkdownRenderChild): void {
+function renderResults(container: HTMLElement, result: StatsResult, settings: TempoSettings, component: MarkdownRenderChild, view: StatsDayView): void {
     container.empty();
 
+    // when filtered to a bucket, summary cards and leaderboard show just that period
+    const effective = view.filteredResult ?? result;
+
     const summary = container.createDiv({cls: "tempo-timers"});
-    addSummaryCard(summary, "clock", formatDuration(result.totalMs, settings), "Total time");
+    addSummaryCard(summary, "clock", formatDuration(effective.totalMs, settings), "Total time");
     addSummaryCard(summary, "files", String(result.fileCount), "Files scanned");
-    addSummaryCard(summary, "list-checks", String(result.leaderboard.length), "Tasks tracked");
+    addSummaryCard(summary, "list-checks", String(effective.leaderboard.length), "Tasks tracked");
 
     const chartWrap = container.createDiv({cls: "tempo-stats-chart-wrap"});
     if (result.buckets.length === 0 || result.buckets.every(b => b.durationMs === 0)) {
         chartWrap.createDiv({cls: "tempo-empty", text: "No tracked time in this range yet."});
     } else {
-        renderBarChart(chartWrap, result.buckets, settings, component);
+        renderBarChart(chartWrap, result.buckets, settings, component, view);
     }
 
+    if (view.selected)
+        renderDayPanel(container, view, settings);
+
     const board = container.createDiv({cls: "tempo-stats-leaderboard"});
-    if (result.leaderboard.length === 0) {
+    if (effective.leaderboard.length === 0) {
         board.createDiv({cls: "tempo-empty", text: "Nothing to rank yet."});
     } else {
-        const max = Math.max(1, ...result.leaderboard.map(r => r.durationMs));
-        for (const row of result.leaderboard) {
-            const rowEl = board.createDiv({cls: "tempo-stats-lb-row"});
-            rowEl.createDiv({cls: "tempo-stats-lb-name", text: row.name});
-            const track = rowEl.createDiv({cls: "tempo-stats-lb-track"});
-            const bar = track.createDiv({cls: "tempo-stats-lb-bar"});
-            bar.style.width = `${Math.max(4, (row.durationMs / max) * 100)}%`;
-            rowEl.createDiv({cls: "tempo-stats-lb-value", text: formatDuration(row.durationMs, settings)});
-        }
+        const max = Math.max(1, ...effective.leaderboard.map(r => r.durationMs));
+        for (const row of effective.leaderboard)
+            addLeaderboardRow(board, row, max, settings);
     }
 }
 
-function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings: TempoSettings, component: MarkdownRenderChild): void {
+function addLeaderboardRow(board: HTMLElement, row: StatsLeaderboardRow, max: number, settings: TempoSettings): void {
+    const rowEl = board.createDiv({cls: "tempo-stats-lb-row"});
+    rowEl.createDiv({cls: "tempo-stats-lb-name", text: row.name});
+    const track = rowEl.createDiv({cls: "tempo-stats-lb-track"});
+    const bar = track.createDiv({cls: "tempo-stats-lb-bar"});
+    bar.style.width = `${Math.max(4, (row.durationMs / max) * 100)}%`;
+    rowEl.createDiv({cls: "tempo-stats-lb-value", text: formatDuration(row.durationMs, settings)});
+}
+
+function renderDayPanel(container: HTMLElement, view: StatsDayView, settings: TempoSettings): void {
+    const sel = view.selected!;
+    const panel = container.createDiv({cls: "tempo-stats-day-panel"});
+
+    const head = panel.createDiv({cls: "tempo-stats-day-head"});
+    const titles = head.createDiv({cls: "tempo-stats-day-titles"});
+    titles.createDiv({cls: "tempo-stats-day-title", text: sel.label});
+    titles.createDiv({cls: "tempo-stats-day-total", text: `${formatDuration(sel.durationMs, settings)} tracked`});
+
+    const actions = head.createDiv({cls: "tempo-stats-day-actions"});
+    const filterBtn = new ButtonComponent(actions)
+        .setButtonText(view.filteredResult ? "Showing this day" : "Filter view to this day")
+        .onClick(() => view.onToggleFilter());
+    filterBtn.buttonEl.addClass("tempo-stats-range-pill");
+    filterBtn.buttonEl.toggleClass("is-active", !!view.filteredResult);
+    new ButtonComponent(actions)
+        .setClass("clickable-icon")
+        .setIcon("lucide-x")
+        .setTooltip("Close")
+        .onClick(() => view.onSelect(null));
+
+    const list = panel.createDiv({cls: "tempo-stats-day-list"});
+    if (sel.leaderboard.length === 0) {
+        list.createDiv({cls: "tempo-empty", text: "No tasks recorded in this period."});
+        return;
+    }
+    const max = Math.max(1, ...sel.leaderboard.map(r => r.durationMs));
+    for (const row of sel.leaderboard)
+        addLeaderboardRow(list, row, max, settings);
+}
+
+function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings: TempoSettings, component: MarkdownRenderChild, view: StatsDayView): void {
     const width = 640;
     const height = 160;
     const paddingBottom = 22;
@@ -420,7 +501,7 @@ function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings
     const svgNS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(svgNS, "svg");
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    svg.setAttribute("class", "tempo-stats-chart");
+    svg.setAttribute("class", view.selected ? "tempo-stats-chart has-selection" : "tempo-stats-chart");
     svg.setAttribute("preserveAspectRatio", "none");
 
     // tooltip shown on hover or click/tap of a bar
@@ -463,12 +544,13 @@ function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings
         rect.setAttribute("rx", "3");
         rect.setAttribute("class", "tempo-stats-bar");
         rect.setAttribute("aria-label", `${bucket.label}: ${formatDuration(bucket.durationMs, settings)}`);
+        rect.toggleClass("is-selected", view.selected?.start === bucket.start);
 
         rect.addEventListener("mouseenter", () => showTip(rect, bucket));
         rect.addEventListener("mouseleave", hideTip);
-        rect.addEventListener("click", (e) => {
-            e.stopPropagation();
-            showTip(rect, bucket);
+        rect.addEventListener("click", () => {
+            hideTip();
+            view.onSelect(bucket);
         });
         svg.appendChild(rect);
 

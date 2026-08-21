@@ -634,12 +634,67 @@
 
 .tempo-stats-bar {
     fill: var(--interactive-accent);
-    transition: fill 120ms ease;
+    transition: fill 120ms ease, opacity 120ms ease;
 }
 
 .tempo-stats-bar:hover,
 .tempo-stats-bar.is-active {
     fill: var(--interactive-accent-hover, var(--interactive-accent));
+}
+
+/* chart drill-down: dim sibling bars while one bucket is selected */
+.tempo-stats-chart.has-selection .tempo-stats-bar:not(.is-selected) {
+    opacity: 0.35;
+}
+
+.tempo-stats-bar.is-selected {
+    fill: var(--interactive-accent-hover, var(--interactive-accent));
+}
+
+/* detail panel shown under the chart for the selected bucket */
+.tempo-stats-day-panel {
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m, 10px);
+    padding: 12px 14px;
+    margin: 0 0 18px;
+}
+
+.tempo-stats-day-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.tempo-stats-day-titles {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+}
+
+.tempo-stats-day-title {
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+.tempo-stats-day-total {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.tempo-stats-day-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.tempo-stats-day-list {
+    max-height: 240px;
+    overflow-y: auto;
 }
 
 /* hover/click tooltip for the daily bar chart */

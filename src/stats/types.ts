@@ -44,7 +44,11 @@ export interface StatsBucket {
     label: string;
     // Start of the bucket, used for sorting and tooltips.
     start: number;
+    // End of the bucket (inclusive), used when filtering the view down to this bucket.
+    end: number;
     durationMs: number;
+    // Per-task totals within this bucket, shown in the drill-down panel.
+    leaderboard: StatsLeaderboardRow[];
 }
 
 // One row in the "by name" leaderboard.
