@@ -621,6 +621,7 @@
 }
 
 .tempo-stats-chart-wrap {
+    position: relative;
     margin: 6px 0 26px;
 }
 
@@ -636,8 +637,47 @@
     transition: fill 120ms ease;
 }
 
-.tempo-stats-bar:hover {
+.tempo-stats-bar:hover,
+.tempo-stats-bar.is-active {
     fill: var(--interactive-accent-hover, var(--interactive-accent));
+}
+
+/* hover/click tooltip for the daily bar chart */
+.tempo-chart-tip {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 5px 10px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s, 6px);
+    box-shadow: var(--shadow-s);
+    transform: translate(-50%, calc(-100% - 6px));
+    pointer-events: none;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 100ms ease;
+    z-index: 5;
+}
+
+.tempo-chart-tip.is-visible {
+    opacity: 1;
+}
+
+.tempo-chart-tip-label {
+    font-size: 0.68em;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.tempo-chart-tip-value {
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--text-normal);
+    font-variant-numeric: tabular-nums;
 }
 
 .tempo-stats-chart-label {

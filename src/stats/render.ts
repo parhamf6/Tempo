@@ -55,7 +55,7 @@ export function displayStats(
         try {
             const scanned = await scanEntries(app, state.sources);
             const result = computeStats(scanned.entries, state.range, scanned.fileCount);
-            renderResults(resultsSection, result, settings);
+            renderResults(resultsSection, result, settings, component);
         } finally {
             refreshing = false;
             refreshButton?.setDisabled(false);
@@ -375,7 +375,7 @@ function addSummaryCard(container: HTMLElement, icon: string, value: string, lab
     card.createSpan({cls: "tempo-timer-label", text: label});
 }
 
-function renderResults(container: HTMLElement, result: StatsResult, settings: TempoSettings): void {
+function renderResults(container: HTMLElement, result: StatsResult, settings: TempoSettings, component: MarkdownRenderChild): void {
     container.empty();
 
     const summary = container.createDiv({cls: "tempo-timers"});
@@ -387,7 +387,7 @@ function renderResults(container: HTMLElement, result: StatsResult, settings: Te
     if (result.buckets.length === 0 || result.buckets.every(b => b.durationMs === 0)) {
         chartWrap.createDiv({cls: "tempo-empty", text: "No tracked time in this range yet."});
     } else {
-        renderBarChart(chartWrap, result.buckets, settings);
+        renderBarChart(chartWrap, result.buckets, settings, component);
     }
 
     const board = container.createDiv({cls: "tempo-stats-leaderboard"});
@@ -406,7 +406,7 @@ function renderResults(container: HTMLElement, result: StatsResult, settings: Te
     }
 }
 
-function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings: TempoSettings): void {
+function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings: TempoSettings, component: MarkdownRenderChild): void {
     const width = 640;
     const height = 160;
     const paddingBottom = 22;
@@ -423,6 +423,35 @@ function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings
     svg.setAttribute("class", "tempo-stats-chart");
     svg.setAttribute("preserveAspectRatio", "none");
 
+    // tooltip shown on hover or click/tap of a bar
+    const tip = container.createDiv({cls: "tempo-chart-tip"});
+    const tipLabel = tip.createDiv({cls: "tempo-chart-tip-label"});
+    const tipValue = tip.createDiv({cls: "tempo-chart-tip-value"});
+    let activeBar: SVGRectElement | null = null;
+
+    const hideTip = (): void => {
+        tip.removeClass("is-visible");
+        activeBar?.removeClass("is-active");
+        activeBar = null;
+    };
+
+    const showTip = (bar: SVGRectElement, bucket: StatsBucket): void => {
+        activeBar?.removeClass("is-active");
+        activeBar = bar;
+        bar.addClass("is-active");
+        tipLabel.setText(bucket.label);
+        tipValue.setText(formatDuration(bucket.durationMs, settings));
+
+        const wrapBox = container.getBoundingClientRect();
+        const barBox = bar.getBoundingClientRect();
+        const half = tip.offsetWidth / 2 + 4;
+        let left = barBox.left - wrapBox.left + barBox.width / 2;
+        left = Math.min(Math.max(left, half), Math.max(half, wrapBox.width - half));
+        tip.style.left = `${left}px`;
+        tip.style.top = `${barBox.top - wrapBox.top}px`;
+        tip.addClass("is-visible");
+    };
+
     buckets.forEach((bucket, i) => {
         const x = i * slot + 2;
         const barH = Math.max(1, (bucket.durationMs / max) * chartHeight);
@@ -433,10 +462,14 @@ function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings
         rect.setAttribute("height", String(barH));
         rect.setAttribute("rx", "3");
         rect.setAttribute("class", "tempo-stats-bar");
+        rect.setAttribute("aria-label", `${bucket.label}: ${formatDuration(bucket.durationMs, settings)}`);
 
-        const title = document.createElementNS(svgNS, "title");
-        title.textContent = `${bucket.label}: ${formatDuration(bucket.durationMs, settings)}`;
-        rect.appendChild(title);
+        rect.addEventListener("mouseenter", () => showTip(rect, bucket));
+        rect.addEventListener("mouseleave", hideTip);
+        rect.addEventListener("click", (e) => {
+            e.stopPropagation();
+            showTip(rect, bucket);
+        });
         svg.appendChild(rect);
 
         if (i % labelEvery === 0) {
@@ -448,6 +481,12 @@ function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings
             text.textContent = bucket.label;
             svg.appendChild(text);
         }
+    });
+
+    // tap/click anywhere outside the chart dismisses a pinned tooltip
+    component.registerDomEvent(document, "click", (e: MouseEvent) => {
+        if (!e.target || !svg.contains(e.target as Node))
+            hideTip();
     });
 
     container.appendChild(svg);
