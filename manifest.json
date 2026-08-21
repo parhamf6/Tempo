@@ -3,7 +3,7 @@
   "name": "Tempo",
   "version": "1.0.0",
   "minAppVersion": "1.13.0",
-  "description": "A modern and minimal multi-purpose time tracker for your notes.",
+  "description": "Time tracking that lives in your notes and survives restarts — then slice the stats by any files, folders, or dates you choose.",
   "author": "Parham Forati",
   "authorUrl": "https://github.com/parhamf6",
   "isDesktopOnly": false
