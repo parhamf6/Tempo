@@ -244,6 +244,17 @@
     height: 1px;
 }
 
+/* name cell: the text wraps on its own while the expand chevron stays
+   pinned beside it instead of dropping to a line below long names */
+.tempo-name-wrap {
+    display: flex;
+    align-items: center;
+}
+
+.tempo-name-wrap > span {
+    min-width: 0;
+}
+
 .tempo-table .clickable-icon {
     display: inline-flex;
     align-items: center;
@@ -253,6 +264,7 @@
 
 .tempo-expand-button {
     margin-inline-start: 0.4em;
+    flex-shrink: 0;
     color: var(--text-faint);
 }
 
@@ -269,10 +281,20 @@
     background: var(--background-primary);
 }
 
+/* table inputs stay fluid so inline editing never inflates the row width */
+.tempo-table .tempo-input {
+    width: 100%;
+    min-width: 60px;
+    max-width: none;
+}
+
 /* ---------- Row action icons: color-coded by what they do ---------- */
 .tempo-table-buttons {
     text-align: right !important;
     white-space: nowrap;
+    position: sticky;
+    right: 0;
+    background-color: inherit;
 }
 
 .tempo-table-buttons .clickable-icon {

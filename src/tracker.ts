@@ -456,6 +456,8 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
         row.addClass("tempo-row-running");
 
     let nameField = new EditableField(row, indent, entry.name);
+    let nameWrap = nameField.cell.createDiv({ cls: "tempo-name-wrap" });
+    nameWrap.appendChild(nameField.label);
     let startField = new EditableTimestampField(row, entry.startTime!, settings);
     let endField = new EditableTimestampField(row, entry.endTime!, settings);
 
@@ -463,7 +465,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
 
     renderNameAsMarkdown(app, nameField.label, getFile, component);
 
-    let expandButton = new ButtonComponent(nameField.label)
+    let expandButton = new ButtonComponent(nameWrap)
         .setClass("clickable-icon")
         .setClass("tempo-expand-button")
         .setIcon(`chevron-${entry.collapsed ? "left" : "down"}`)
