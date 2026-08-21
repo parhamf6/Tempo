@@ -785,3 +785,122 @@
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
 }
+
+/* ---------- Collapsible task-percentage breakdown ---------- */
+.tempo-breakdown {
+    margin-top: 10px;
+}
+
+.tempo-breakdown-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 0;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.tempo-breakdown-summary::-webkit-details-marker {
+    display: none;
+}
+
+.tempo-breakdown-summary:hover {
+    color: var(--text-normal);
+}
+
+.tempo-breakdown-summary-icon {
+    display: inline-flex;
+    transition: transform 120ms ease;
+}
+
+.tempo-breakdown[open] .tempo-breakdown-summary-icon {
+    transform: rotate(90deg);
+}
+
+.tempo-breakdown[open] .tempo-breakdown-summary {
+    margin-bottom: 12px;
+}
+
+.tempo-breakdown-body {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 22px;
+}
+
+.tempo-breakdown-chart {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.tempo-breakdown-donut {
+    width: 150px;
+    height: 150px;
+    display: block;
+}
+
+.tempo-breakdown-slice {
+    fill: none;
+    transition: opacity 120ms ease;
+}
+
+.tempo-breakdown-slice:hover,
+.tempo-breakdown-slice.is-hl {
+    opacity: 0.75;
+}
+
+.tempo-breakdown-total {
+    fill: var(--text-normal);
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.tempo-breakdown-legend {
+    flex: 1 1 200px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.tempo-breakdown-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 0.85em;
+}
+
+.tempo-breakdown-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+
+.tempo-breakdown-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-normal);
+}
+
+.tempo-breakdown-pct {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* tasks merged into the "Other" slice, listed under its legend row */
+.tempo-breakdown-subitem {
+    padding: 1px 0 1px 18px;
+    font-size: 0.78em;
+    line-height: 1.5;
+    color: var(--text-faint);
+}

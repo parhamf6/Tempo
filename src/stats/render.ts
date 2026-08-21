@@ -445,6 +445,8 @@ function renderResults(container: HTMLElement, result: StatsResult, settings: Te
         for (const row of effective.leaderboard)
             addLeaderboardRow(board, row, max, settings);
     }
+
+    renderTaskBreakdown(container, effective, settings);
 }
 
 function addLeaderboardRow(board: HTMLElement, row: StatsLeaderboardRow, max: number, settings: TempoSettings): void {
@@ -454,6 +456,126 @@ function addLeaderboardRow(board: HTMLElement, row: StatsLeaderboardRow, max: nu
     const bar = track.createDiv({cls: "tempo-stats-lb-bar"});
     bar.style.width = `${Math.max(4, (row.durationMs / max) * 100)}%`;
     rowEl.createDiv({cls: "tempo-stats-lb-value", text: formatDuration(row.durationMs, settings)});
+}
+
+function renderTaskBreakdown(container: HTMLElement, result: StatsResult, settings: TempoSettings): void {
+    if (result.leaderboard.length === 0 || result.totalMs <= 0)
+        return;
+
+    const details = container.createEl("details", {cls: "tempo-breakdown"});
+    const summary = details.createEl("summary", {cls: "tempo-breakdown-summary"});
+    setIcon(summary.createSpan({cls: "tempo-breakdown-summary-icon"}), "chevron-right");
+    summary.createSpan({text: "Task breakdown (%)", cls: "tempo-breakdown-summary-text"});
+
+    // top slices + everything else merged into "Other"
+    const maxSlices = 6;
+    const palette = [
+        "var(--color-blue)", "var(--color-green)", "var(--color-yellow)",
+        "var(--color-orange)", "var(--color-red)", "var(--color-purple)",
+        "var(--color-cyan)", "var(--color-pink)"
+    ];
+    const otherColor = "var(--text-faint)";
+    const slices = result.leaderboard.slice(0, maxSlices)
+        .map(r => ({name: r.name, durationMs: r.durationMs}));
+    const rest = result.leaderboard.slice(maxSlices);
+    const restMs = rest.reduce((sum, r) => sum + r.durationMs, 0);
+    if (restMs > 0)
+        slices.push({name: "Other", durationMs: restMs});
+
+    const body = details.createDiv({cls: "tempo-breakdown-body"});
+    const chartWrap = body.createDiv({cls: "tempo-breakdown-chart"});
+
+    const size = 120;
+    const center = size / 2;
+    const radius = 44;
+    const thickness = 16;
+    const circumference = 2 * Math.PI * radius;
+
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+    svg.setAttribute("class", "tempo-breakdown-donut");
+
+    const tip = chartWrap.createDiv({cls: "tempo-chart-tip"});
+    const tipLabel = tip.createDiv({cls: "tempo-chart-tip-label"});
+    const tipValue = tip.createDiv({cls: "tempo-chart-tip-value"});
+
+    let acc = 0;
+    slices.forEach((slice, i) => {
+        const frac = slice.durationMs / result.totalMs;
+        const color = i < maxSlices ? palette[i % palette.length]! : otherColor;
+
+        const circle = document.createElementNS(svgNS, "circle");
+        circle.setAttribute("cx", String(center));
+        circle.setAttribute("cy", String(center));
+        circle.setAttribute("r", String(radius));
+        circle.setAttribute("fill", "none");
+        circle.setAttribute("stroke", color);
+        circle.setAttribute("stroke-width", String(thickness));
+        circle.setAttribute("stroke-dasharray", `${frac * circumference} ${circumference}`);
+        circle.setAttribute("stroke-dashoffset", String(-acc * circumference));
+        circle.setAttribute("transform", `rotate(-90 ${center} ${center})`);
+        circle.setAttribute("class", "tempo-breakdown-slice");
+        circle.setAttribute("aria-label", `${slice.name}: ${formatPct(slice.durationMs, result.totalMs)} · ${formatDuration(slice.durationMs, settings)}`);
+
+        circle.addEventListener("mouseenter", () => {
+            circle.addClass("is-hl");
+            tipLabel.setText(slice.name);
+            tipValue.setText(`${formatPct(slice.durationMs, result.totalMs)} · ${formatDuration(slice.durationMs, settings)}`);
+            const svgBox = svg.getBoundingClientRect();
+            const wrapBox = chartWrap.getBoundingClientRect();
+            const scale = svgBox.width / size;
+            const mid = (acc + frac / 2) * 2 * Math.PI - Math.PI / 2;
+            const x = svgBox.left - wrapBox.left + (center + radius * Math.cos(mid)) * scale;
+            const y = svgBox.top - wrapBox.top + (center + radius * Math.sin(mid)) * scale;
+            tip.style.left = `${x}px`;
+            tip.style.top = `${y}px`;
+            tip.addClass("is-visible");
+        });
+        circle.addEventListener("mouseleave", () => {
+            circle.removeClass("is-hl");
+            tip.removeClass("is-visible");
+        });
+        svg.appendChild(circle);
+        acc += frac;
+    });
+
+    const totalValue = document.createElementNS(svgNS, "text");
+    totalValue.setAttribute("x", String(center));
+    totalValue.setAttribute("y", String(center + 1));
+    totalValue.setAttribute("text-anchor", "middle");
+    totalValue.setAttribute("class", "tempo-breakdown-total");
+    totalValue.textContent = formatDuration(result.totalMs, settings);
+    svg.appendChild(totalValue);
+
+    chartWrap.appendChild(svg);
+
+    const legend = body.createDiv({cls: "tempo-breakdown-legend"});
+    slices.forEach((slice, i) => {
+        const row = legend.createDiv({cls: "tempo-breakdown-row"});
+        const dot = row.createSpan({cls: "tempo-breakdown-dot"});
+        dot.style.background = i < maxSlices ? palette[i % palette.length]! : otherColor;
+        row.createSpan({cls: "tempo-breakdown-name", text: slice.name});
+        row.createSpan({
+            cls: "tempo-breakdown-pct",
+            text: `${formatPct(slice.durationMs, result.totalMs)} · ${formatDuration(slice.durationMs, settings)}`
+        });
+
+        // list which tasks were merged into the "Other" slice
+        if (i === maxSlices && rest.length > 0) {
+            const joined = rest.map(r => r.name).join(" - ");
+            legend.createDiv({
+                cls: "tempo-breakdown-subitem",
+                text: joined,
+                attr: {title: joined}
+            });
+        }
+    });
+}
+
+function formatPct(ms: number, total: number): string {
+    const pct = (ms / total) * 100;
+    return pct >= 9.95 ? `${Math.round(pct)}%` : `${Math.round(pct * 10) / 10}%`;
 }
 
 function renderDayPanel(container: HTMLElement, view: StatsDayView, settings: TempoSettings): void {
