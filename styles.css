@@ -411,6 +411,7 @@
     }
     .tempo-container * {
         transition: none !important;
+        animation: none !important;
     }
 }
 
@@ -659,6 +660,7 @@
     gap: 8px;
     margin-top: 10px;
     flex-wrap: wrap;
+    animation: tempo-reveal 200ms ease-out;
 }
 
 .tempo-stats-range-custom .tempo-input {
@@ -709,6 +711,22 @@
     border-radius: var(--radius-m, 10px);
     padding: 12px 14px;
     margin: 0 0 18px;
+}
+
+/* entrance when the user clicks a bar; exit when it is dismissed */
+.tempo-stats-day-panel.is-entering {
+    animation: tempo-reveal 200ms ease-out;
+}
+
+.tempo-stats-day-panel.is-closing {
+    animation: tempo-collapse 170ms ease-in forwards;
+}
+
+@keyframes tempo-collapse {
+    to {
+        opacity: 0;
+        transform: translateY(-6px);
+    }
 }
 
 .tempo-stats-day-head {
@@ -823,11 +841,34 @@
     border-radius: var(--radius-s, 6px);
 }
 
+/* smooth expand/collapse via the grid-rows trick */
 .tempo-stats-lb-detail {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 220ms ease;
+}
+
+.tempo-stats-lb-detail.is-open {
+    grid-template-rows: 1fr;
+}
+
+.tempo-stats-lb-detail-inner {
     display: flex;
     flex-direction: column;
     gap: 1px;
-    padding: 2px 8px 8px 32px;
+    min-height: 0;
+    overflow: hidden;
+    /* vertical spacing must NOT live on the collapsing wrapper itself —
+       an element can never shrink below its own padding */
+    padding: 0 8px 0 32px;
+}
+
+.tempo-stats-lb-day:first-child {
+    margin-top: 2px;
+}
+
+.tempo-stats-lb-day:last-child {
+    margin-bottom: 6px;
 }
 
 .tempo-stats-lb-day {
@@ -944,6 +985,36 @@
 
 .tempo-breakdown[open] .tempo-breakdown-summary {
     margin-bottom: 12px;
+}
+
+/* animated reveal when opening (works everywhere) */
+details.tempo-breakdown[open] .tempo-breakdown-body {
+    animation: tempo-reveal 200ms ease-out;
+}
+
+@keyframes tempo-reveal {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/* smooth height animation where the engine supports it (::details-content,
+   Chromium 131+); other engines just snap as before */
+@supports selector(details::details-content) {
+    details.tempo-breakdown::details-content {
+        block-size: 0;
+        overflow-y: clip;
+        transition: block-size 200ms ease, content-visibility 200ms allow-discrete;
+    }
+
+    details.tempo-breakdown[open]::details-content {
+        block-size: auto;
+    }
 }
 
 .tempo-breakdown-body {

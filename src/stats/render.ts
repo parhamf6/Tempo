@@ -58,6 +58,11 @@ export function displayStats(
     // leaderboard accordion: normalized name of the currently expanded task row
     let openTaskKey: string | null = null;
 
+    // day-panel entrance/exit choreography (user-triggered only, so background
+    // refreshes never replay the animation)
+    let panelEnterPending = false;
+    let closingTimer: number | undefined;
+
     const refresh = async (): Promise<void> => {
         if (refreshing)
             return;
@@ -85,14 +90,25 @@ export function displayStats(
                 selected,
                 filteredResult,
                 openTaskKey,
+                panelEntering: panelEnterPending,
                 onSelect: (bucket) => {
-                    if (bucket && bucket.start !== selectedKey) {
-                        selectedKey = bucket.start;
-                        filterActive = false;
-                    } else {
-                        selectedKey = null;
-                        filterActive = false;
+                    const shouldClose = !bucket || bucket.start === selectedKey;
+                    if (shouldClose) {
+                        if (!selectedKey || closingTimer !== undefined)
+                            return;
+                        // animate the panel out first, then commit the state change
+                        resultsSection.querySelector(".tempo-stats-day-panel")?.addClass("is-closing");
+                        closingTimer = window.setTimeout(() => {
+                            closingTimer = undefined;
+                            selectedKey = null;
+                            filterActive = false;
+                            void refresh();
+                        }, 170);
+                        return;
                     }
+                    panelEnterPending = true;
+                    selectedKey = bucket.start;
+                    filterActive = false;
                     void refresh();
                 },
                 onToggleFilter: () => {
@@ -100,10 +116,11 @@ export function displayStats(
                     void refresh();
                 },
                 onToggleTask: (key) => {
+                    // silent sync only — the accordion itself animates locally
                     openTaskKey = key;
-                    void refresh();
                 }
             });
+            panelEnterPending = false;
             restoreStatsUiState(resultsSection, uiState);
         } finally {
             refreshing = false;
@@ -538,6 +555,8 @@ interface StatsDayView {
     filteredResult: StatsResult | null;
     // leaderboard accordion: which task's day-by-day list is expanded
     openTaskKey: string | null;
+    // true right after a user click opened the day panel (drives the entrance animation)
+    panelEntering: boolean;
     onSelect: (bucket: StatsBucket | null) => void;
     onToggleFilter: () => void;
     onToggleTask: (key: string | null) => void;
@@ -600,8 +619,12 @@ function renderResults(container: HTMLElement, result: StatsResult, settings: Te
         renderBarChart(chartWrap, result.buckets, settings, component, view);
     }
 
-    if (view.selected)
-        renderDayPanel(container, view, settings);
+    if (view.selected) {
+        const panel = renderDayPanel(container, view, settings);
+        // entrance animation only when the user just opened it, not on background refreshes
+        if (view.panelEntering)
+            panel.addClass("is-entering");
+    }
 
     if (effective.leaderboard.length === 0) {
         const board = container.createDiv({cls: "tempo-stats-leaderboard"});
@@ -619,21 +642,50 @@ function renderResults(container: HTMLElement, result: StatsResult, settings: Te
         const board = container.createDiv({cls: "tempo-stats-leaderboard"});
         const noMatch = board.createDiv({cls: "tempo-empty", text: "No tasks match."});
         noMatch.hide();
+
+        // one accordion open at a time; toggling animates locally, no re-render
+        let openKey = view.openTaskKey;
+        const accordions = new Map<string, {collapse: HTMLElement, inner: HTMLElement, filled: boolean, row: StatsLeaderboardRow, rowEl: HTMLElement}>();
+
+        const setAccordion = (key: string | null): void => {
+            // always close whatever is open (including the clicked one when toggling off)
+            if (openKey) {
+                const prev = accordions.get(openKey);
+                prev?.collapse.removeClass("is-open");
+                prev?.rowEl.setAttribute("title", "Show day-by-day times");
+            }
+            if (key) {
+                const target = accordions.get(key);
+                if (!target!.filled) {
+                    fillTaskDetail(target!.inner, target!.row, result.buckets, settings);
+                    target!.filled = true;
+                }
+                target!.collapse.addClass("is-open");
+                target!.rowEl.setAttribute("title", "Hide day-by-day times");
+            }
+            openKey = key;
+            view.onToggleTask(key); // silent sync so background refreshes restore the state
+        };
+
         const items = effective.leaderboard.map(row => {
             const item = board.createDiv({cls: "tempo-stats-lb-item"});
             const rowEl = addLeaderboardRow(item, row, max, settings);
             rowEl.addClass("is-clickable");
-            rowEl.setAttribute("title", "Show day-by-day times");
 
             // expandable per-day breakdown, fed by each bucket's own leaderboard
             const key = taskKeyOf(row.name);
-            const isOpen = view.openTaskKey === key;
-            const detail = item.createDiv({cls: "tempo-stats-lb-detail"});
-            if (isOpen)
-                fillTaskDetail(detail, row, result.buckets, settings);
-            detail.toggle(isOpen);
+            const collapse = item.createDiv({cls: "tempo-stats-lb-detail"});
+            const inner = collapse.createDiv({cls: "tempo-stats-lb-detail-inner"});
+            const entry = {collapse, inner, filled: false, row, rowEl};
+            accordions.set(key, entry);
+            if (openKey === key) {
+                fillTaskDetail(inner, row, result.buckets, settings);
+                entry.filled = true;
+                collapse.addClass("is-open");
+            }
+            rowEl.setAttribute("title", openKey === key ? "Hide day-by-day times" : "Show day-by-day times");
             rowEl.addEventListener("click", () =>
-                view.onToggleTask(isOpen ? null : key));
+                setAccordion(openKey === key ? null : key));
 
             return {el: item, name: row.name.toLowerCase()};
         });
@@ -809,7 +861,7 @@ function formatPct(ms: number, total: number): string {
     return pct >= 9.95 ? `${Math.round(pct)}%` : `${Math.round(pct * 10) / 10}%`;
 }
 
-function renderDayPanel(container: HTMLElement, view: StatsDayView, settings: TempoSettings): void {
+function renderDayPanel(container: HTMLElement, view: StatsDayView, settings: TempoSettings): HTMLDivElement {
     const sel = view.selected!;
     const panel = container.createDiv({cls: "tempo-stats-day-panel"});
 
@@ -833,11 +885,12 @@ function renderDayPanel(container: HTMLElement, view: StatsDayView, settings: Te
     const list = panel.createDiv({cls: "tempo-stats-day-list"});
     if (sel.leaderboard.length === 0) {
         list.createDiv({cls: "tempo-empty", text: "No tasks recorded in this period."});
-        return;
+        return panel;
     }
     const max = Math.max(1, ...sel.leaderboard.map(r => r.durationMs));
     for (const row of sel.leaderboard)
         addLeaderboardRow(list, row, max, settings);
+    return panel;
 }
 
 function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings: TempoSettings, component: MarkdownRenderChild, view: StatsDayView): void {
