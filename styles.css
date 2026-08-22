@@ -813,6 +813,66 @@
     padding: 6px 0;
 }
 
+/* clickable leaderboard rows expand a per-day breakdown */
+.tempo-stats-lb-row.is-clickable {
+    cursor: pointer;
+}
+
+.tempo-stats-lb-row.is-clickable:hover {
+    background: var(--background-modifier-hover);
+    border-radius: var(--radius-s, 6px);
+}
+
+.tempo-stats-lb-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 2px 8px 8px 32px;
+}
+
+.tempo-stats-lb-day {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0;
+    font-size: 0.75em;
+}
+
+.tempo-stats-lb-day-date {
+    flex: 0 0 auto;
+    min-width: 52px;
+    color: var(--text-muted);
+}
+
+.tempo-stats-lb-day-track {
+    flex: 1 1 auto;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--background-modifier-border);
+    overflow: hidden;
+}
+
+.tempo-stats-lb-day-bar {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--interactive-accent);
+    opacity: 0.75;
+}
+
+.tempo-stats-lb-day-value {
+    flex: 0 0 auto;
+    min-width: 56px;
+    text-align: right;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* days without tracked time stay visible but dimmed */
+.tempo-stats-lb-day.is-zero .tempo-stats-lb-day-date,
+.tempo-stats-lb-day.is-zero .tempo-stats-lb-day-value {
+    color: var(--text-faint);
+}
+
 .tempo-stats-lb-name {
     flex: 0 0 32%;
     min-width: 0;

@@ -55,6 +55,9 @@ export function displayStats(
     // so tab titles keep their "ending today" meaning on reload
     let rangeOffset = 0;
 
+    // leaderboard accordion: normalized name of the currently expanded task row
+    let openTaskKey: string | null = null;
+
     const refresh = async (): Promise<void> => {
         if (refreshing)
             return;
@@ -81,6 +84,7 @@ export function displayStats(
             renderResults(resultsSection, result, settings, component, {
                 selected,
                 filteredResult,
+                openTaskKey,
                 onSelect: (bucket) => {
                     if (bucket && bucket.start !== selectedKey) {
                         selectedKey = bucket.start;
@@ -93,6 +97,10 @@ export function displayStats(
                 },
                 onToggleFilter: () => {
                     filterActive = !filterActive;
+                    void refresh();
+                },
+                onToggleTask: (key) => {
+                    openTaskKey = key;
                     void refresh();
                 }
             });
@@ -528,8 +536,11 @@ function renderRange(
 interface StatsDayView {
     selected: StatsBucket | null;
     filteredResult: StatsResult | null;
+    // leaderboard accordion: which task's day-by-day list is expanded
+    openTaskKey: string | null;
     onSelect: (bucket: StatsBucket | null) => void;
     onToggleFilter: () => void;
+    onToggleTask: (key: string | null) => void;
 }
 
 // ephemeral view state that should survive a background re-render
@@ -608,14 +619,28 @@ function renderResults(container: HTMLElement, result: StatsResult, settings: Te
         const board = container.createDiv({cls: "tempo-stats-leaderboard"});
         const noMatch = board.createDiv({cls: "tempo-empty", text: "No tasks match."});
         noMatch.hide();
-        const rowEls = effective.leaderboard.map(row => ({
-            el: addLeaderboardRow(board, row, max, settings),
-            name: row.name.toLowerCase()
-        }));
+        const items = effective.leaderboard.map(row => {
+            const item = board.createDiv({cls: "tempo-stats-lb-item"});
+            const rowEl = addLeaderboardRow(item, row, max, settings);
+            rowEl.addClass("is-clickable");
+            rowEl.setAttribute("title", "Show day-by-day times");
+
+            // expandable per-day breakdown, fed by each bucket's own leaderboard
+            const key = taskKeyOf(row.name);
+            const isOpen = view.openTaskKey === key;
+            const detail = item.createDiv({cls: "tempo-stats-lb-detail"});
+            if (isOpen)
+                fillTaskDetail(detail, row, result.buckets, settings);
+            detail.toggle(isOpen);
+            rowEl.addEventListener("click", () =>
+                view.onToggleTask(isOpen ? null : key));
+
+            return {el: item, name: row.name.toLowerCase()};
+        });
         filterInput.addEventListener("input", () => {
             const query = filterInput.value.trim().toLowerCase();
             let visible = 0;
-            for (const {el, name} of rowEls) {
+            for (const {el, name} of items) {
                 const show = !query || name.includes(query);
                 el.toggle(show);
                 if (show)
@@ -636,6 +661,32 @@ function addLeaderboardRow(board: HTMLElement, row: StatsLeaderboardRow, max: nu
     bar.style.width = `${Math.max(4, (row.durationMs / max) * 100)}%`;
     rowEl.createDiv({cls: "tempo-stats-lb-value", text: formatDuration(row.durationMs, settings)});
     return rowEl;
+}
+
+// leaderboard grouping key (matches buildLeaderboard in aggregate.ts)
+function taskKeyOf(name: string): string {
+    return name.trim().toLowerCase();
+}
+
+// expands a task row into its per-bucket times across the visible window
+function fillTaskDetail(container: HTMLElement, row: StatsLeaderboardRow, buckets: StatsBucket[], settings: TempoSettings): void {
+    const key = taskKeyOf(row.name);
+    const series = buckets.map(b => ({
+        label: b.label,
+        ms: b.leaderboard.find(r => taskKeyOf(r.name) === key)?.durationMs ?? 0
+    }));
+    const max = Math.max(1, ...series.map(s => s.ms));
+
+    for (const point of series) {
+        const line = container.createDiv({cls: "tempo-stats-lb-day" + (point.ms > 0 ? "" : " is-zero")});
+        line.createDiv({cls: "tempo-stats-lb-day-date", text: point.label});
+        const track = line.createDiv({cls: "tempo-stats-lb-day-track"});
+        if (point.ms > 0) {
+            const bar = track.createDiv({cls: "tempo-stats-lb-day-bar"});
+            bar.style.width = `${Math.max(6, (point.ms / max) * 100)}%`;
+        }
+        line.createDiv({cls: "tempo-stats-lb-day-value", text: formatDuration(point.ms, settings)});
+    }
 }
 
 function renderTaskBreakdown(container: HTMLElement, result: StatsResult, settings: TempoSettings): void {
