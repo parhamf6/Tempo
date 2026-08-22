@@ -437,25 +437,50 @@ function renderResults(container: HTMLElement, result: StatsResult, settings: Te
     if (view.selected)
         renderDayPanel(container, view, settings);
 
-    const board = container.createDiv({cls: "tempo-stats-leaderboard"});
     if (effective.leaderboard.length === 0) {
+        const board = container.createDiv({cls: "tempo-stats-leaderboard"});
         board.createDiv({cls: "tempo-empty", text: "Nothing to rank yet."});
     } else {
         const max = Math.max(1, ...effective.leaderboard.map(r => r.durationMs));
-        for (const row of effective.leaderboard)
-            addLeaderboardRow(board, row, max, settings);
+
+        // client-side task name filter; toggles rows without re-rendering so focus survives
+        const searchRow = container.createDiv({cls: "tempo-stats-lb-search"});
+        const filterInput = searchRow.createEl("input", {
+            cls: "tempo-input tempo-lb-filter",
+            attr: {type: "search", placeholder: "Filter tasks…", spellcheck: false}
+        });
+
+        const board = container.createDiv({cls: "tempo-stats-leaderboard"});
+        const noMatch = board.createDiv({cls: "tempo-empty", text: "No tasks match."});
+        noMatch.hide();
+        const rowEls = effective.leaderboard.map(row => ({
+            el: addLeaderboardRow(board, row, max, settings),
+            name: row.name.toLowerCase()
+        }));
+        filterInput.addEventListener("input", () => {
+            const query = filterInput.value.trim().toLowerCase();
+            let visible = 0;
+            for (const {el, name} of rowEls) {
+                const show = !query || name.includes(query);
+                el.toggle(show);
+                if (show)
+                    visible++;
+            }
+            noMatch.toggle(visible === 0);
+        });
     }
 
     renderTaskBreakdown(container, effective, settings);
 }
 
-function addLeaderboardRow(board: HTMLElement, row: StatsLeaderboardRow, max: number, settings: TempoSettings): void {
+function addLeaderboardRow(board: HTMLElement, row: StatsLeaderboardRow, max: number, settings: TempoSettings): HTMLDivElement {
     const rowEl = board.createDiv({cls: "tempo-stats-lb-row"});
     rowEl.createDiv({cls: "tempo-stats-lb-name", text: row.name});
     const track = rowEl.createDiv({cls: "tempo-stats-lb-track"});
     const bar = track.createDiv({cls: "tempo-stats-lb-bar"});
     bar.style.width = `${Math.max(4, (row.durationMs / max) * 100)}%`;
     rowEl.createDiv({cls: "tempo-stats-lb-value", text: formatDuration(row.durationMs, settings)});
+    return rowEl;
 }
 
 function renderTaskBreakdown(container: HTMLElement, result: StatsResult, settings: TempoSettings): void {

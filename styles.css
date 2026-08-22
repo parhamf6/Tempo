@@ -745,6 +745,16 @@
     overflow-y: auto;
 }
 
+.tempo-stats-lb-search {
+    margin-bottom: 6px;
+}
+
+.tempo-lb-filter {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+}
+
 .tempo-stats-lb-row {
     display: flex;
     align-items: center;
