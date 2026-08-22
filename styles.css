@@ -573,22 +573,73 @@
     margin-bottom: 24px;
 }
 
-.tempo-stats-range-pills {
+/* single-line range bar: ghost preset tabs · ‹ date navigator › */
+.tempo-stats-range-bar {
     display: flex;
-    gap: 8px;
+    align-items: center;
+    justify-content: center;
     flex-wrap: wrap;
+    gap: 2px;
+}
+
+.tempo-range-divider {
+    width: 1px;
+    height: 14px;
+    background: var(--background-modifier-border);
+    margin: 0 8px;
+}
+
+.tempo-range-nav-btn {
+    color: var(--text-muted);
+}
+
+.tempo-range-nav-btn:hover:not([disabled]) {
+    color: var(--text-normal);
+}
+
+.tempo-range-nav-btn svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* the label shows the visible window; while parked in the past it turns into
+   an accent-colored "back to today" button */
+.tempo-stats-range-label {
+    min-width: 130px;
+    text-align: center;
+    font-size: 0.78em;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 3px 8px;
+    border-radius: 6px;
+    cursor: default;
+}
+
+.tempo-stats-range-label.is-parked {
+    color: var(--interactive-accent);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.tempo-stats-range-label.is-parked:hover {
+    background: var(--background-modifier-hover);
 }
 
 .tempo-stats-range-pill {
     margin: 0;
-    padding: 6px 16px;
+    padding: 3px 11px;
     border-radius: 999px;
     background: transparent;
-    border: 1px solid var(--background-modifier-border);
+    border: none;
     color: var(--text-muted);
     box-shadow: none;
-    font-size: 0.82em;
-    transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+    font-size: 0.78em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 120ms ease, background-color 120ms ease;
 }
 
 .tempo-stats-range-pill:hover {
@@ -597,9 +648,9 @@
 }
 
 .tempo-stats-range-pill.is-active {
-    background: var(--interactive-accent);
-    border-color: var(--interactive-accent);
-    color: var(--text-on-accent, #fff);
+    background: rgba(var(--interactive-accent-rgb, 0, 0, 0), 0.14);
+    color: var(--interactive-accent);
+    font-weight: 600;
 }
 
 .tempo-stats-range-custom {

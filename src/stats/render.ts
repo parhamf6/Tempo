@@ -12,10 +12,10 @@ import {
 import {TempoSettings} from "../settings";
 import {formatDuration} from "../tracker";
 import {scanEntries} from "./scan";
-import {computeStats, computeStatsForPeriod} from "./aggregate";
+import {computeStats, computeStatsForPeriod, resolveRange} from "./aggregate";
 import {saveStatsState} from "./state";
 import {buildStatsCsv} from "./export";
-import {StatsBucket, StatsLeaderboardRow, StatsRangeType, StatsResult, StatsSource, StatsState} from "./types";
+import {StatsBucket, StatsLeaderboardRow, StatsRange, StatsRangeType, StatsResult, StatsSource, StatsState} from "./types";
 
 type GetFile = () => string;
 
@@ -51,6 +51,10 @@ export function displayStats(
     let selectedKey: number | null = null;
     let filterActive = false;
 
+    // session-only date-navigator position (days into the past); never persisted,
+    // so tab titles keep their "ending today" meaning on reload
+    let rangeOffset = 0;
+
     const refresh = async (): Promise<void> => {
         if (refreshing)
             return;
@@ -58,7 +62,7 @@ export function displayStats(
         refreshButton?.setDisabled(true);
         try {
             const scanned = await scanEntries(app, state.sources);
-            const result = computeStats(scanned.entries, state.range, scanned.fileCount);
+            const result = computeStats(scanned.entries, {...state.range, offset: rangeOffset || undefined}, scanned.fileCount);
 
             // drop the selection if it no longer matches a bucket (e.g. range changed)
             if (selectedKey !== null && !result.buckets.some(b => b.start === selectedKey)) {
@@ -105,7 +109,12 @@ export function displayStats(
     };
 
     renderSources(sourcesSection, state, onChange);
-    renderRange(rangeSection, state, onChange);
+    renderRange(rangeSection, state, onChange, {
+        getOffset: () => rangeOffset,
+        setOffset: (offset) => {
+            rangeOffset = offset;
+        }
+    });
 
     refreshButton = new ButtonComponent(bottom).onClick(async () => await refresh());
     setIcon(refreshButton.buttonEl.createSpan({cls: "tempo-btn-icon"}), "refresh-cw");
@@ -340,9 +349,14 @@ const rangeOptions: RangeOption[] = [
     {type: "custom", label: "Custom"}
 ];
 
-function renderRange(container: HTMLElement, state: StatsState, onChange: () => Promise<void>): void {
+function renderRange(
+    container: HTMLElement,
+    state: StatsState,
+    onChange: () => Promise<void>,
+    nav: { getOffset: () => number, setOffset: (offset: number) => void }
+): void {
     container.empty();
-    const pillsRow = container.createDiv({cls: "tempo-stats-range-pills"});
+    const barRow = container.createDiv({cls: "tempo-stats-range-bar"});
     const customRow = container.createDiv({cls: "tempo-stats-range-custom"});
 
     const isActive = (opt: RangeOption): boolean => {
@@ -357,6 +371,124 @@ function renderRange(container: HTMLElement, state: StatsState, onChange: () => 
     const updateActiveStyles = (): void => {
         buttonEls.forEach((el, i) => el.toggleClass("is-active", isActive(rangeOptions[i]!)));
     };
+
+    // preset tabs
+    for (const opt of rangeOptions) {
+        const btn = new ButtonComponent(barRow)
+            .setButtonText(opt.label)
+            .onClick(async () => {
+                state.range = opt.type === "days" ? {type: "days", days: opt.days} : {type: opt.type};
+                // switching tabs jumps back to the window ending today
+                nav.setOffset(0);
+                updateActiveStyles();
+                updateNav();
+                rerenderCustom();
+                await onChange();
+            });
+        btn.buttonEl.addClass("tempo-stats-range-pill");
+        buttonEls.push(btn.buttonEl);
+    }
+
+    // --- inline date navigator: ‹ window › ----------------------------------
+    barRow.createDiv({cls: "tempo-range-divider"});
+
+    const prevBtn = new ButtonComponent(barRow)
+        .setClass("clickable-icon")
+        .setClass("tempo-range-nav-btn")
+        .setIcon("chevron-left")
+        .setTooltip("Previous day");
+    const labelEl = barRow.createEl("button", {cls: "tempo-stats-range-label", attr: {type: "button"}});
+    const nextBtn = new ButtonComponent(barRow)
+        .setClass("clickable-icon")
+        .setClass("tempo-range-nav-btn")
+        .setIcon("chevron-right")
+        .setTooltip("Next day");
+
+    const effectiveRange = (): StatsRange => ({
+        ...state.range,
+        offset: state.range.type === "custom" ? undefined : nav.getOffset()
+    });
+
+    const customReady = (): boolean =>
+        state.range.type !== "custom" || (!!state.range.start && !!state.range.end);
+
+    // true when the window's end reaches today
+    const atPresent = (): boolean => {
+        if (state.range.type === "custom")
+            return !!state.range.end && moment(state.range.end).isSameOrAfter(moment(), "day");
+        return nav.getOffset() <= 0;
+    };
+
+    const updateNav = (): void => {
+        if (!customReady()) {
+            labelEl.setText("Pick a date range");
+            prevBtn.setDisabled(true);
+            nextBtn.setDisabled(true);
+            labelEl.removeClass("is-parked");
+            labelEl.removeAttribute("title");
+            return;
+        }
+
+        const {start, end} = resolveRange(effectiveRange());
+        if (state.range.type === "today") {
+            labelEl.setText(start.format("ddd, MMM D YYYY"));
+        } else {
+            const sameYear = start.year() === end.year();
+            labelEl.setText(`${start.format(sameYear ? "MMM D" : "MMM D, YYYY")} – ${end.format("MMM D, YYYY")}`);
+        }
+
+        // ▶ is disabled once the window's end reaches today
+        nextBtn.setDisabled(atPresent());
+        // parked in the past → the label itself becomes a "back to today" button
+        labelEl.toggleClass("is-parked", !atPresent());
+        if (atPresent())
+            labelEl.removeAttribute("title");
+        else
+            labelEl.setAttribute("title", "Back to today");
+    };
+
+    const stepBack = async (dir: 1 | -1): Promise<void> => {
+        if (!customReady())
+            return;
+        // always step by a single day, regardless of range length
+        if (state.range.type === "custom" && state.range.start && state.range.end) {
+            state.range = {
+                ...state.range,
+                start: moment(state.range.start).add(dir, "days").format("YYYY-MM-DD"),
+                end: moment(state.range.end).add(dir, "days").format("YYYY-MM-DD")
+            };
+            rerenderCustom();
+        } else {
+            nav.setOffset(Math.max(0, nav.getOffset() + dir));
+        }
+        updateNav();
+        await onChange();
+    };
+
+    prevBtn.onClick(() => stepBack(1));
+    nextBtn.onClick(() => stepBack(-1));
+
+    // clicking the label jumps back to the present when parked in the past
+    const jumpToPresent = async (): Promise<void> => {
+        if (state.range.type === "custom" && state.range.start && state.range.end) {
+            const span = moment(state.range.end).diff(moment(state.range.start), "days") + 1;
+            state.range = {
+                ...state.range,
+                end: moment().format("YYYY-MM-DD"),
+                start: moment().subtract(span - 1, "days").format("YYYY-MM-DD")
+            };
+            rerenderCustom();
+        } else {
+            nav.setOffset(0);
+        }
+        updateNav();
+        await onChange();
+    };
+
+    labelEl.addEventListener("click", () => {
+        if (customReady() && !atPresent())
+            void jumpToPresent();
+    });
 
     const rerenderCustom = (): void => {
         customRow.empty();
@@ -384,21 +516,9 @@ function renderRange(container: HTMLElement, state: StatsState, onChange: () => 
             });
     };
 
-    for (const opt of rangeOptions) {
-        const btn = new ButtonComponent(pillsRow)
-            .setButtonText(opt.label)
-            .onClick(async () => {
-                state.range = opt.type === "days" ? {type: "days", days: opt.days} : {type: opt.type};
-                updateActiveStyles();
-                rerenderCustom();
-                await onChange();
-            });
-        btn.buttonEl.addClass("tempo-stats-range-pill");
-        buttonEls.push(btn.buttonEl);
-    }
-
     updateActiveStyles();
     rerenderCustom();
+    updateNav();
 }
 
 // ---------------------------------------------------------------------------

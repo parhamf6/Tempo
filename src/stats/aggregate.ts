@@ -5,8 +5,12 @@ import {StatsBucket, StatsLeaderboardRow, StatsRange, StatsResult} from "./types
 type Moment = ReturnType<typeof moment>;
 
 export function resolveRange(range: StatsRange): { start: Moment, end: Moment } {
+    // how many days the window is parked in the past via the date navigator
+    const shift = range.offset ?? 0;
+
     if (range.type === "today") {
-        return {start: moment().startOf("day"), end: moment().endOf("day")};
+        const day = moment().subtract(shift, "days");
+        return {start: moment(day).startOf("day"), end: moment(day).endOf("day")};
     }
     if (range.type === "custom" && range.start && range.end) {
         let start = moment(range.start).startOf("day");
@@ -21,8 +25,8 @@ export function resolveRange(range: StatsRange): { start: Moment, end: Moment } 
     // default / "days"
     const days = Math.max(1, range.days ?? 7);
     return {
-        start: moment().subtract(days - 1, "days").startOf("day"),
-        end: moment().endOf("day")
+        start: moment().subtract(days - 1 + shift, "days").startOf("day"),
+        end: moment().subtract(shift, "days").endOf("day")
     };
 }
 

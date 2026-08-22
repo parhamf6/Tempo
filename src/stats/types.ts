@@ -25,6 +25,10 @@ export interface StatsRange {
     // Only used when type === "custom". ISO date strings (YYYY-MM-DD).
     start?: string;
     end?: string;
+    // Days the window is shifted into the past via the date navigator.
+    // Session-only: injected at render time, never persisted to the code block,
+    // so the tab titles always keep their "ending today" meaning on reload.
+    offset?: number;
 }
 
 export interface StatsState {
