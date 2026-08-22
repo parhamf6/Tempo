@@ -71,6 +71,13 @@ export async function loadAllTrackers(app: App, fileName: string): Promise<{ sec
 
 type GetFile = () => string;
 
+// a table duration cell whose entry contains the running leaf, so it must be
+// re-formatted every second while the tracker runs
+interface LiveDurationCell {
+    entry: Entry;
+    cell: HTMLTableCellElement;
+}
+
 export function displayTracker(app: App, tracker: Tracker, element: HTMLElement, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation, settings: TempoSettings, component: MarkdownRenderChild): void {
 
     element.addClass("tempo-container");
@@ -135,6 +142,7 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
         });
     }
 
+    let liveCells: LiveDurationCell[] = [];
     if (tracker.entries.length > 0) {
         // add table
         let table = element.createEl("table", { cls: "tempo-table" });
@@ -146,7 +154,7 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
             createEl("th"));
 
         for (let entry of orderedEntries(tracker.entries, settings))
-            addEditableTableRow(app, tracker, entry, table, newSegmentNameBox, running, getFile, getSectionInfo, settings, 0, component);
+            addEditableTableRow(app, tracker, entry, table, newSegmentNameBox, running, getFile, getSectionInfo, settings, 0, component, liveCells);
 
         // add copy buttons
         let buttons = element.createDiv({ cls: "tempo-bottom" });
@@ -169,6 +177,12 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
             return;
         }
         setCountdownValues(tracker, current, total, totalToday, currentDiv, settings);
+        // keep the running segment's (and its ancestors') table durations ticking too
+        for (const {entry, cell} of liveCells) {
+            if (!cell.isConnected)
+                continue;
+            cell.setText(formatDuration(getDuration(entry), settings));
+        }
     }, 1000);
 }
 
@@ -250,6 +264,14 @@ export function getRunningEntry(entries: Entry[]): Entry | undefined {
         }
     }
     return undefined;
+}
+
+// true when this entry's subtree contains the running leaf, i.e. its displayed
+// duration grows in real time until the tracker is stopped
+function hasRunningLeaf(entry: Entry): boolean {
+    if (entry.subEntries)
+        return entry.subEntries.some(hasRunningLeaf);
+    return !!entry.startTime && !entry.endTime;
 }
 
 export function createMarkdownTable(tracker: Tracker, settings: TempoSettings): string {
@@ -446,7 +468,7 @@ function createTableSection(entry: Entry, settings: TempoSettings, indent: numbe
     return ret;
 }
 
-function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HTMLTableElement, newSegmentNameBox: TextComponent, trackerRunning: boolean, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation, settings: TempoSettings, indent: number, component: MarkdownRenderChild): void {
+function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HTMLTableElement, newSegmentNameBox: TextComponent, trackerRunning: boolean, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation, settings: TempoSettings, indent: number, component: MarkdownRenderChild, liveCells: LiveDurationCell[]): void {
     let entryRunning = getRunningEntry(tracker.entries) == entry;
     let row = table.createEl("tr");
     row.style.setProperty("--depth", String(indent));
@@ -461,7 +483,14 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
     let startField = new EditableTimestampField(row, entry.startTime!, settings);
     let endField = new EditableTimestampField(row, entry.endTime!, settings);
 
-    row.createEl("td", { text: entry.endTime || entry.subEntries ? formatDuration(getDuration(entry), settings) : "" });
+    let durationCell = row.createEl("td");
+    if (hasRunningLeaf(entry)) {
+        // this row's duration grows in real time; displayTracker keeps it ticking
+        durationCell.setText(formatDuration(getDuration(entry), settings));
+        liveCells.push({entry, cell: durationCell});
+    } else {
+        durationCell.setText(entry.endTime || entry.subEntries ? formatDuration(getDuration(entry), settings) : "");
+    }
 
     renderNameAsMarkdown(app, nameField.label, getFile, component);
 
@@ -584,7 +613,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
 
     if (entry.subEntries && !entry.collapsed) {
         for (let sub of orderedEntries(entry.subEntries, settings))
-            addEditableTableRow(app, tracker, sub, table, newSegmentNameBox, trackerRunning, getFile, getSectionInfo, settings, indent + 1, component);
+            addEditableTableRow(app, tracker, sub, table, newSegmentNameBox, trackerRunning, getFile, getSectionInfo, settings, indent + 1, component, liveCells);
     }
 }
 

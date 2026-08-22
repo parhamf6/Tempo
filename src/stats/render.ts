@@ -72,6 +72,8 @@ export function displayStats(
                 ? computeStatsForPeriod(scanned.entries, selected.start, selected.end, scanned.fileCount)
                 : null;
 
+            // remember ephemeral view state so background refreshes don't disturb the reader
+            const uiState = captureStatsUiState(resultsSection);
             renderResults(resultsSection, result, settings, component, {
                 selected,
                 filteredResult,
@@ -90,6 +92,7 @@ export function displayStats(
                     void refresh();
                 }
             });
+            restoreStatsUiState(resultsSection, uiState);
         } finally {
             refreshing = false;
             refreshButton?.setDisabled(false);
@@ -407,6 +410,38 @@ interface StatsDayView {
     filteredResult: StatsResult | null;
     onSelect: (bucket: StatsBucket | null) => void;
     onToggleFilter: () => void;
+}
+
+// ephemeral view state that should survive a background re-render
+interface StatsUiState {
+    breakdownOpen: boolean;
+    lbScrollTop: number;
+    lbFilter: string;
+}
+
+function captureStatsUiState(root: HTMLElement): StatsUiState {
+    return {
+        breakdownOpen: root.querySelector<HTMLDetailsElement>("details.tempo-breakdown")?.open ?? false,
+        lbScrollTop: root.querySelector<HTMLElement>(".tempo-stats-leaderboard")?.scrollTop ?? 0,
+        lbFilter: root.querySelector<HTMLInputElement>(".tempo-lb-filter")?.value ?? ""
+    };
+}
+
+function restoreStatsUiState(root: HTMLElement, state: StatsUiState): void {
+    const breakdown = root.querySelector<HTMLDetailsElement>("details.tempo-breakdown");
+    if (breakdown)
+        breakdown.open = state.breakdownOpen;
+
+    const board = root.querySelector<HTMLElement>(".tempo-stats-leaderboard");
+    if (board)
+        board.scrollTop = state.lbScrollTop;
+
+    const filter = root.querySelector<HTMLInputElement>(".tempo-lb-filter");
+    if (filter && state.lbFilter) {
+        filter.value = state.lbFilter;
+        // re-run the row filtering for the restored query
+        filter.dispatchEvent(new Event("input"));
+    }
 }
 
 function addSummaryCard(container: HTMLElement, icon: string, value: string, label: string): void {
