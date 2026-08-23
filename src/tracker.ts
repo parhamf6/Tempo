@@ -107,6 +107,13 @@ export async function loadAllTrackers(app: App, fileName: string): Promise<{ sec
 
 type GetFile = () => string;
 
+// lets collapse/expand flip row visibility instantly in the DOM instead of
+// waiting for the debounced note write + block re-render
+interface RowVisibility {
+    rowByEntry: Map<Entry, HTMLTableRowElement>;
+    apply: (root: Entry, ancestorCollapsed: boolean) => void;
+}
+
 // a table duration cell whose entry contains the running leaf, so it must be
 // re-formatted every second while the tracker runs
 interface LiveDurationCell {
@@ -190,6 +197,24 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
             void saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
         }, 300);
     };
+    // every row is built upfront (collapsed subtrees included, just hidden), so
+    // toggling is pure local DOM work — the write only persists the flag
+    const rowByEntry = new Map<Entry, HTMLTableRowElement>();
+    const visibility: RowVisibility = {
+        rowByEntry,
+        apply: (root, ancestorCollapsed) => {
+            if (!root.subEntries)
+                return;
+            for (const sub of root.subEntries) {
+                const row = rowByEntry.get(sub);
+                // a nested collapsed flag keeps its own subtree hidden even
+                // when an outer level expands
+                if (row)
+                    row.hidden = ancestorCollapsed || !!sub.collapsed;
+                visibility.apply(sub, ancestorCollapsed || !!sub.collapsed);
+            }
+        }
+    };
     if (tracker.entries.length > 0) {
         // add table
         let table = element.createEl("table", { cls: "tempo-table" });
@@ -201,7 +226,7 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
             createEl("th"));
 
         for (let entry of orderedEntries(tracker.entries, settings))
-            addEditableTableRow(app, tracker, entry, table, newSegmentNameBox, running, getFile, getSectionInfo, settings, 0, component, liveCells, scheduleCollapseSave);
+            addEditableTableRow(app, tracker, entry, table, newSegmentNameBox, running, getFile, getSectionInfo, settings, 0, component, liveCells, scheduleCollapseSave, visibility, false);
 
         // add copy buttons
         let buttons = element.createDiv({ cls: "tempo-bottom" });
@@ -543,9 +568,13 @@ function createTableSection(entry: Entry, settings: TempoSettings, indent: numbe
     return ret;
 }
 
-function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HTMLTableElement, newSegmentNameBox: TextComponent, trackerRunning: boolean, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation | null, settings: TempoSettings, indent: number, component: MarkdownRenderChild, liveCells: LiveDurationCell[], scheduleCollapseSave: () => void): void {
+function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HTMLTableElement, newSegmentNameBox: TextComponent, trackerRunning: boolean, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation | null, settings: TempoSettings, indent: number, component: MarkdownRenderChild, liveCells: LiveDurationCell[], scheduleCollapseSave: () => void, visibility: RowVisibility, ancestorsCollapsed: boolean): void {
     let entryRunning = getRunningEntry(tracker.entries) == entry;
     let row = table.createEl("tr");
+    visibility.rowByEntry.set(entry, row);
+    // this row hides only when an ancestor is collapsed — its own flag hides
+    // its descendants, not itself
+    row.hidden = ancestorsCollapsed;
     row.style.setProperty("--depth", String(indent));
     if (indent > 0)
         row.addClass("tempo-subrow");
@@ -575,9 +604,10 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
         .setIcon(`chevron-${entry.collapsed ? "left" : "down"}`)
         .onClick(() => {
             entry.collapsed = entry.collapsed ? undefined : true;
-            // flip the chevron immediately; the debounced write persists it and
-            // the resulting re-render shows/hides the sub-entries
+            // flip the chevron and show/hide the sub-rows instantly; only the
+            // persistence write is debounced in the background
             void expandButton.setIcon(`chevron-${entry.collapsed ? "left" : "down"}`);
+            visibility.apply(entry, !!entry.collapsed);
             scheduleCollapseSave();
         });
     if (!entry.subEntries)
@@ -685,9 +715,9 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
             await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
         });
 
-    if (entry.subEntries && !entry.collapsed) {
+    if (entry.subEntries) {
         for (let sub of orderedEntries(entry.subEntries, settings))
-            addEditableTableRow(app, tracker, sub, table, newSegmentNameBox, trackerRunning, getFile, getSectionInfo, settings, indent + 1, component, liveCells, scheduleCollapseSave);
+            addEditableTableRow(app, tracker, sub, table, newSegmentNameBox, trackerRunning, getFile, getSectionInfo, settings, indent + 1, component, liveCells, scheduleCollapseSave, visibility, ancestorsCollapsed || !!entry.collapsed);
     }
 }
 

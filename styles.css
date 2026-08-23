@@ -205,6 +205,11 @@
     transition: background-color 120ms ease;
 }
 
+/* collapsed sub-rows stay in the DOM (hidden) so toggling is instant */
+.tempo-table tr[hidden] {
+    display: none;
+}
+
 .tempo-table tr:hover {
     background-color: var(--background-modifier-hover);
 }
