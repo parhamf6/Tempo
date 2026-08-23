@@ -94,21 +94,14 @@ export class TempoSettingsTab extends PluginSettingTab {
             },
             {
                 name: "Support the plugin",
-                desc: "Join the Discord server for help, or support development through the website.",
+                desc: "Report issues or contribute on GitHub.",
                 render: (setting: Setting, _group: SettingGroup) => {
                     setting.infoEl.empty();
                     setting.controlEl.empty();
-                    setting.infoEl.createEl("p", {text: "Need help using the plugin? Feel free to join the Discord server!"});
-                    setting.infoEl.createEl("a", {href: "https://link.ellpeck.de/discordweb"}).createEl("img", {
-                        attr: {src: "https://ellpeck.de/res/discord-wide.png"},
-                        cls: "tempo-settings-image"
-                    });
-                    setting.infoEl.createEl("p", {
-                        text: "If you like this plugin and want to support its development, you can do so through my website by clicking this fancy image!"
-                    });
-                    setting.infoEl.createEl("a", {href: "https://ellpeck.de/support"}).createEl("img", {
-                        attr: {src: "https://ellpeck.de/res/generalsupport-wide.png"},
-                        cls: "tempo-settings-image"
+                    setting.infoEl.createEl("p", {text: "Found a bug or have an idea? Open an issue on GitHub:"});
+                    setting.infoEl.createEl("a", {
+                        text: "Open the repository",
+                        href: "https://github.com/parhamf6/Tempo/issues"
                     });
                 }
             }

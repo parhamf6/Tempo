@@ -11,7 +11,7 @@ import {
 } from "obsidian";
 import {TempoSettings} from "../settings";
 import {formatDuration} from "../tracker";
-import {scanEntries} from "./scan";
+import {invalidateStatsCache, scanEntries} from "./scan";
 import {computeStats, computeStatsForPeriod, resolveRange} from "./aggregate";
 import {saveStatsState} from "./state";
 import {buildStatsCsv} from "./export";
@@ -28,7 +28,7 @@ export function displayStats(
     state: StatsState,
     element: HTMLElement,
     getFile: GetFile,
-    getSectionInfo: () => MarkdownSectionInformation,
+    getSectionInfo: () => MarkdownSectionInformation | null,
     settings: TempoSettings,
     component: MarkdownRenderChild
 ): void {
@@ -161,8 +161,16 @@ export function displayStats(
     };
     component.registerEvent(app.vault.on("modify", () => scheduleRefresh()));
     component.registerEvent(app.vault.on("create", () => scheduleRefresh()));
-    component.registerEvent(app.vault.on("delete", () => scheduleRefresh()));
-    component.registerEvent(app.vault.on("rename", () => scheduleRefresh()));
+    component.registerEvent(app.vault.on("delete", (file) => {
+        invalidateStatsCache(file.path);
+        scheduleRefresh();
+    }));
+    component.registerEvent(app.vault.on("rename", (_file, oldPath) => {
+        // renames keep their mtime, so drop the stale path or the old cache
+        // entry lingers forever; the file re-parses under its new path
+        invalidateStatsCache(oldPath);
+        scheduleRefresh();
+    }));
 
     void refresh();
 }
@@ -670,7 +678,10 @@ function renderResults(container: HTMLElement, result: StatsResult, settings: Te
         const items = effective.leaderboard.map(row => {
             const item = board.createDiv({cls: "tempo-stats-lb-item"});
             const rowEl = addLeaderboardRow(item, row, max, settings);
+            // clickable + keyboard-operable (Enter/Space) accordion toggle
             rowEl.addClass("is-clickable");
+            rowEl.setAttribute("role", "button");
+            rowEl.setAttribute("tabindex", "0");
 
             // expandable per-day breakdown, fed by each bucket's own leaderboard
             const key = taskKeyOf(row.name);
@@ -684,8 +695,16 @@ function renderResults(container: HTMLElement, result: StatsResult, settings: Te
                 collapse.addClass("is-open");
             }
             rowEl.setAttribute("title", openKey === key ? "Hide day-by-day times" : "Show day-by-day times");
-            rowEl.addEventListener("click", () =>
-                setAccordion(openKey === key ? null : key));
+
+            const toggleAccordion = (): void =>
+                setAccordion(openKey === key ? null : key);
+            rowEl.addEventListener("click", toggleAccordion);
+            rowEl.addEventListener("keydown", (e: KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleAccordion();
+                }
+            });
 
             return {el: item, name: row.name.toLowerCase()};
         });
@@ -787,6 +806,9 @@ function renderTaskBreakdown(container: HTMLElement, result: StatsResult, settin
     slices.forEach((slice, i) => {
         const frac = slice.durationMs / result.totalMs;
         const color = i < maxSlices ? palette[i % palette.length]! : otherColor;
+        // capture this slice's accumulated offset NOW — event closures below
+        // must not read `acc` after the loop has finished incrementing it
+        const sliceStart = acc;
 
         const circle = document.createElementNS(svgNS, "circle");
         circle.setAttribute("cx", String(center));
@@ -799,26 +821,33 @@ function renderTaskBreakdown(container: HTMLElement, result: StatsResult, settin
         circle.setAttribute("stroke-dashoffset", String(-acc * circumference));
         circle.setAttribute("transform", `rotate(-90 ${center} ${center})`);
         circle.setAttribute("class", "tempo-breakdown-slice");
+        circle.setAttribute("role", "img");
+        circle.setAttribute("tabindex", "0");
         circle.setAttribute("aria-label", `${slice.name}: ${formatPct(slice.durationMs, result.totalMs)} · ${formatDuration(slice.durationMs, settings)}`);
 
-        circle.addEventListener("mouseenter", () => {
+        // shared by mouse hover and keyboard focus so tooltips work without a mouse
+        const showSliceTip = (): void => {
             circle.addClass("is-hl");
             tipLabel.setText(slice.name);
             tipValue.setText(`${formatPct(slice.durationMs, result.totalMs)} · ${formatDuration(slice.durationMs, settings)}`);
             const svgBox = svg.getBoundingClientRect();
             const wrapBox = chartWrap.getBoundingClientRect();
             const scale = svgBox.width / size;
-            const mid = (acc + frac / 2) * 2 * Math.PI - Math.PI / 2;
+            const mid = (sliceStart + frac / 2) * 2 * Math.PI - Math.PI / 2;
             const x = svgBox.left - wrapBox.left + (center + radius * Math.cos(mid)) * scale;
             const y = svgBox.top - wrapBox.top + (center + radius * Math.sin(mid)) * scale;
             tip.style.left = `${x}px`;
             tip.style.top = `${y}px`;
             tip.addClass("is-visible");
-        });
-        circle.addEventListener("mouseleave", () => {
+        };
+        const hideSliceTip = (): void => {
             circle.removeClass("is-hl");
             tip.removeClass("is-visible");
-        });
+        };
+        circle.addEventListener("mouseenter", showSliceTip);
+        circle.addEventListener("mouseleave", hideSliceTip);
+        circle.addEventListener("focus", showSliceTip);
+        circle.addEventListener("blur", hideSliceTip);
         svg.appendChild(circle);
         acc += frac;
     });

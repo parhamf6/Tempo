@@ -1,5 +1,5 @@
 {
-    "name": "simple-time-tracker",
+    "name": "tempo",
     "version": "1.3.0",
     "description": "Multi-purpose time trackers for your notes!",
     "main": "main.js",
@@ -11,7 +11,7 @@
         "lint": "eslint ."
     },
     "keywords": [],
-    "author": "Ellpeck",
+    "author": "Parham Forati",
     "license": "MIT",
     "devDependencies": {
         "@eslint/js": "^9.39.4",

@@ -20,6 +20,25 @@ export function invalidateStatsCache(filePath?: string): void {
     }
 }
 
+// User-supplied regex patterns compiled once per pattern+flags; recompiling on
+// every refresh was wasted work since sources rarely change between refreshes.
+const regexCache = new Map<string, RegExp | null>();
+
+function compileSourceRegex(pattern: string, caseSensitive: boolean): RegExp | null {
+    const cacheKey = `${caseSensitive ? "c" : "i"}:${pattern}`;
+    let regex = regexCache.get(cacheKey);
+    if (regex === undefined) {
+        try {
+            regex = new RegExp(pattern, caseSensitive ? "" : "i");
+        } catch {
+            // invalid regex: treat as no matches for this source rather than throwing
+            regex = null;
+        }
+        regexCache.set(cacheKey, regex);
+    }
+    return regex;
+}
+
 function normalizeMdPath(path: string): string {
     let p = path.trim().replace(/^\/+/, "");
     if (!p.toLowerCase().endsWith(".md"))
@@ -68,13 +87,9 @@ export function resolveSourceFiles(app: App, sources: StatsSource[]): TFile[] {
         const recursive = source.recursive ?? true;
         let regex: RegExp | null = null;
         if (source.matchMode === "regex" && source.pattern) {
-            try {
-                regex = new RegExp(source.pattern, source.caseSensitive ? "" : "i");
-            } catch {
-                // invalid regex: treat as no matches for this source rather than throwing
-                regex = null;
-                continue;
-            }
+            regex = compileSourceRegex(source.pattern, source.caseSensitive ?? false);
+            if (!regex)
+                continue; // invalid pattern: this source contributes nothing
         }
 
         for (const file of app.vault.getMarkdownFiles()) {
@@ -108,10 +123,16 @@ export interface ScannedData {
     fileCount: number;
 }
 
+// parallel reads per batch: much faster cold scans than sequential awaits,
+// without hammering (mobile) storage with hundreds of concurrent file reads
+const SCAN_BATCH_SIZE = 8;
+
 export async function scanEntries(app: App, sources: StatsSource[]): Promise<ScannedData> {
     const files = resolveSourceFiles(app, sources);
-    const entries: Entry[] = [];
-    for (const file of files)
-        entries.push(...await getFileEntries(app, file));
-    return {entries, fileCount: files.length};
+    const entries: Entry[][] = [];
+    for (let i = 0; i < files.length; i += SCAN_BATCH_SIZE) {
+        entries.push(...await Promise.all(
+            files.slice(i, i + SCAN_BATCH_SIZE).map(file => getFileEntries(app, file))));
+    }
+    return {entries: entries.flat(), fileCount: files.length};
 }

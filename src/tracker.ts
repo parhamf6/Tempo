@@ -14,20 +14,44 @@ export interface Entry {
     collapsed?: boolean;
 }
 
-export async function saveTracker(app: App, tracker: Tracker, fileName: string, section: MarkdownSectionInformation, settings: TempoSettings): Promise<void> {
-    let file = app.vault.getAbstractFileByPath(fileName);
+// Persists one ```tempo / ```tempo-stats code block section back into its note.
+// Uses vault.process(), which serializes writes under Obsidian's lock, so two
+// blocks saving to the same note (or a save racing Sync) can no longer clobber
+// each other through interleaved read-modify-write cycles.
+export async function saveSection(app: App, fileName: string, section: MarkdownSectionInformation | null, serialized: string): Promise<void> {
+    // blocks rendered outside a live editor context (embeds, some popouts) have
+    // no section info — there is nothing safe to write back to
+    if (!section)
+        return;
+    const file = app.vault.getAbstractFileByPath(fileName);
     if (!(file instanceof TFile))
         return;
-    let content = await app.vault.read(file);
 
-    // figure out what part of the content we have to edit
-    let lines = content.split("\n");
-    let prev = lines.filter((_, i) => i <= section.lineStart).join("\n");
-    let next = lines.filter((_, i) => i >= section.lineEnd).join("\n");
-    // edit only the code block content, leave the rest untouched
-    content = `${prev}\n${JSON.stringify(tracker, null, settings.prettyPrintJson ? 2 : undefined)}\n${next}`;
+    await app.vault.process(file, content => {
+        const lines = content.split("\n");
+        // Obsidian reports the fences themselves as the section bounds; tolerate
+        // implementations that report the first/last content line instead
+        let startLine = section.lineStart;
+        if (!(lines[startLine] ?? "").trimStart().startsWith("```"))
+            startLine -= 1;
+        let endLine = section.lineEnd;
+        if (!(lines[endLine] ?? "").trimStart().startsWith("```"))
+            endLine += 1;
+        // stale editor info (an external edit shifted the lines between render
+        // and save): bail instead of splicing into an unrelated region
+        if (!(lines[startLine] ?? "").trimStart().startsWith("```") ||
+            !(lines[endLine] ?? "").trimStart().startsWith("```")) {
+            console.warn("Tempo: skipped saving because the note changed around the block. Interact with it again to retry.");
+            return content;
+        }
+        const prev = lines.slice(0, startLine + 1).join("\n");
+        const next = lines.slice(endLine).join("\n");
+        return `${prev}\n${serialized}\n${next}`;
+    });
+}
 
-    await app.vault.modify(file, content);
+export async function saveTracker(app: App, tracker: Tracker, fileName: string, section: MarkdownSectionInformation | null, settings: TempoSettings): Promise<void> {
+    await saveSection(app, fileName, section, JSON.stringify(tracker, null, settings.prettyPrintJson ? 2 : undefined));
 }
 
 export function loadTracker(json: string): Tracker {
@@ -50,19 +74,20 @@ export async function loadAllTrackers(app: App, fileName: string): Promise<{ sec
     let content = (await app.vault.cachedRead(file)).split("\n");
 
     let trackers: { section: MarkdownSectionInformation, tracker: Tracker }[] = [];
-    let curr: Partial<MarkdownSectionInformation> | undefined;
+    let curr: { info: Partial<MarkdownSectionInformation>, lines: string[] } | undefined;
     for (let i = 0; i < content.length; i++) {
         let line = content[i]!;
         if (line.trimEnd() == "```tempo") {
-            curr = { lineStart: i + 1, text: "" };
+            curr = { info: { lineStart: i + 1 }, lines: [] };
         } else if (curr) {
             if (line.trimEnd() == "```") {
-                curr.lineEnd = i - 1;
-                let tracker = loadTracker(curr.text!);
-                trackers.push({ section: curr as MarkdownSectionInformation, tracker: tracker });
+                curr.info.lineEnd = i - 1;
+                let tracker = loadTracker(curr.lines.join("\n"));
+                trackers.push({ section: curr.info as MarkdownSectionInformation, tracker: tracker });
                 curr = undefined;
             } else {
-                curr.text += `${line}\n`;
+                // push + join instead of string concatenation: O(n) on long files
+                curr.lines.push(line);
             }
         }
     }
@@ -78,7 +103,7 @@ interface LiveDurationCell {
     cell: HTMLTableCellElement;
 }
 
-export function displayTracker(app: App, tracker: Tracker, element: HTMLElement, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation, settings: TempoSettings, component: MarkdownRenderChild): void {
+export function displayTracker(app: App, tracker: Tracker, element: HTMLElement, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation | null, settings: TempoSettings, component: MarkdownRenderChild): void {
 
     element.addClass("tempo-container");
     // add start/stop controls
@@ -468,7 +493,7 @@ function createTableSection(entry: Entry, settings: TempoSettings, indent: numbe
     return ret;
 }
 
-function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HTMLTableElement, newSegmentNameBox: TextComponent, trackerRunning: boolean, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation, settings: TempoSettings, indent: number, component: MarkdownRenderChild, liveCells: LiveDurationCell[]): void {
+function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HTMLTableElement, newSegmentNameBox: TextComponent, trackerRunning: boolean, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation | null, settings: TempoSettings, indent: number, component: MarkdownRenderChild, liveCells: LiveDurationCell[]): void {
     let entryRunning = getRunningEntry(tracker.entries) == entry;
     let row = table.createEl("tr");
     row.style.setProperty("--depth", String(indent));
@@ -492,7 +517,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
         durationCell.setText(entry.endTime || entry.subEntries ? formatDuration(getDuration(entry), settings) : "");
     }
 
-    renderNameAsMarkdown(app, nameField.label, getFile, component);
+    void renderNameAsMarkdown(app, nameField.label, entry.name, getFile, component);
 
     let expandButton = new ButtonComponent(nameWrap)
         .setClass("clickable-icon")
@@ -565,7 +590,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
         await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
         void editButton.setIcon("lucide-pencil");
         editButton.buttonEl.removeClass("tempo-action-editing");
-        renderNameAsMarkdown(app, nameField.label, getFile, component);
+        void renderNameAsMarkdown(app, nameField.label, entry.name, getFile, component);
     }
 
     function startEditing() {
@@ -624,12 +649,19 @@ function showConfirm(app: App, message: string): Promise<boolean> {
     });
 }
 
-function renderNameAsMarkdown(app: App, label: HTMLSpanElement, getFile: GetFile, component: Component): void {
-    // we don't have to wait here since async code only occurs when a file needs to be loaded (like a linked image)
-    void MarkdownRenderer.render(app, label.innerHTML, label, getFile(), component);
-    // rendering wraps it in a paragraph
-    let p = label.querySelector("p");
-    label.replaceChildren(...p?.hasChildNodes() ? Array.from(p.childNodes) : []);
+async function renderNameAsMarkdown(app: App, label: HTMLSpanElement, name: string, getFile: GetFile, component: Component): Promise<void> {
+    // render into a detached container first: MarkdownRenderer resolves
+    // asynchronously when content needs loading (linked images etc.), and the
+    // old approach wrote into the label while unwrapping it synchronously,
+    // racing the renderer. Passing the raw name (not innerHTML) also keeps
+    // literal HTML in task names from being interpreted as markup.
+    const temp = createSpan();
+    await MarkdownRenderer.render(app, name, temp, getFile(), component);
+    if (!label.isConnected)
+        return; // the table was rebuilt while we were rendering; discard
+    // rendering wraps the content in a paragraph — unwrap it
+    const p = temp.querySelector("p");
+    label.replaceChildren(...(p?.hasChildNodes() ? Array.from(p.childNodes) : []));
 }
 
 

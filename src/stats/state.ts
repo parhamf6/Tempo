@@ -1,5 +1,6 @@
-import {App, MarkdownSectionInformation, TFile} from "obsidian";
+import {App, MarkdownSectionInformation} from "obsidian";
 import {TempoSettings} from "../settings";
+import {saveSection} from "../tracker";
 import {defaultStatsState, StatsState} from "./types";
 
 export function loadStatsState(json: string): StatsState {
@@ -17,16 +18,6 @@ export function loadStatsState(json: string): StatsState {
     return {sources: [], range: {...defaultStatsState.range}};
 }
 
-export async function saveStatsState(app: App, state: StatsState, fileName: string, section: MarkdownSectionInformation, settings: TempoSettings): Promise<void> {
-    const file = app.vault.getAbstractFileByPath(fileName);
-    if (!(file instanceof TFile))
-        return;
-    let content = await app.vault.read(file);
-
-    const lines = content.split("\n");
-    const prev = lines.filter((_, i) => i <= section.lineStart).join("\n");
-    const next = lines.filter((_, i) => i >= section.lineEnd).join("\n");
-    content = `${prev}\n${JSON.stringify(state, null, settings.prettyPrintJson ? 2 : undefined)}\n${next}`;
-
-    await app.vault.modify(file, content);
+export async function saveStatsState(app: App, state: StatsState, fileName: string, section: MarkdownSectionInformation | null, settings: TempoSettings): Promise<void> {
+    await saveSection(app, fileName, section, JSON.stringify(state, null, settings.prettyPrintJson ? 2 : undefined));
 }
