@@ -44,6 +44,17 @@ export async function saveSection(app: App, fileName: string, section: MarkdownS
             console.warn("Tempo: skipped saving because the note changed around the block. Interact with it again to retry.");
             return content;
         }
+        // second guard: the region we are about to replace must actually be
+        // tracker data, not some other code block the stale bounds landed on
+        const existing = lines.slice(startLine + 1, endLine).join("\n").trim();
+        if (existing !== "") {
+            try {
+                JSON.parse(existing);
+            } catch {
+                console.warn("Tempo: skipped saving because the block content no longer looks like tracker data.");
+                return content;
+            }
+        }
         const prev = lines.slice(0, startLine + 1).join("\n");
         const next = lines.slice(endLine).join("\n");
         return `${prev}\n${serialized}\n${next}`;
@@ -168,6 +179,17 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
     }
 
     let liveCells: LiveDurationCell[] = [];
+    // collapse toggles rewrite the whole note section just to persist a boolean;
+    // debounce bursts of toggles into a single write (still session-surviving)
+    let collapseSaveTimer: number | undefined;
+    const scheduleCollapseSave = (): void => {
+        if (collapseSaveTimer !== undefined)
+            window.clearTimeout(collapseSaveTimer);
+        collapseSaveTimer = window.setTimeout(() => {
+            collapseSaveTimer = undefined;
+            void saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        }, 300);
+    };
     if (tracker.entries.length > 0) {
         // add table
         let table = element.createEl("table", { cls: "tempo-table" });
@@ -179,7 +201,7 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
             createEl("th"));
 
         for (let entry of orderedEntries(tracker.entries, settings))
-            addEditableTableRow(app, tracker, entry, table, newSegmentNameBox, running, getFile, getSectionInfo, settings, 0, component, liveCells);
+            addEditableTableRow(app, tracker, entry, table, newSegmentNameBox, running, getFile, getSectionInfo, settings, 0, component, liveCells, scheduleCollapseSave);
 
         // add copy buttons
         let buttons = element.createDiv({ cls: "tempo-bottom" });
@@ -195,20 +217,48 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
 
 
     setCountdownValues(tracker, current, total, totalToday, currentDiv, settings);
-    let intervalId = window.setInterval(() => {
-        // we delete the interval timer when the element is removed
-        if (!element.isConnected) {
-            window.clearInterval(intervalId);
-            return;
-        }
-        setCountdownValues(tracker, current, total, totalToday, currentDiv, settings);
-        // keep the running segment's (and its ancestors') table durations ticking too
-        for (const {entry, cell} of liveCells) {
-            if (!cell.isConnected)
-                continue;
-            cell.setText(formatDuration(getDuration(entry), settings));
-        }
-    }, 1000);
+
+    // While the tracker runs, every displayed duration grows linearly with wall
+    // clock time, so each tick just adds elapsed Date.now() delta to baselines
+    // captured at render time — no moment objects in the hot path. Any edit
+    // re-renders (and re-baselines) the whole block anyway. registerInterval
+    // clears the timer when the component unloads.
+    const runningEntry = getRunningEntry(tracker.entries);
+    if (runningEntry && !runningEntry.endTime) {
+        const baselineNow = Date.now();
+        const runningBaseMs = getDuration(runningEntry);
+        const totalBaseMs = getTotalDuration(tracker.entries);
+        const liveBases = liveCells.map(lc => ({cell: lc.cell, baseMs: getDuration(lc.entry)}));
+        let todayBaseMs = totalToday ? getTotalDurationToday(tracker.entries) : 0;
+        let todayAnchor = baselineNow;
+        let dayStamp = new Date(baselineNow).getDate();
+
+        component.registerInterval(window.setInterval(() => {
+            if (!element.isConnected)
+                return;
+            const now = Date.now();
+            const elapsedMs = now - baselineNow;
+
+            current.setText(formatDuration(runningBaseMs + elapsedMs, settings));
+            total.setText(formatDuration(totalBaseMs + elapsedMs, settings));
+
+            if (totalToday) {
+                // past midnight "today" becomes a different window: recompute
+                // from scratch so yesterday's entries drop out of the total
+                if (new Date(now).getDate() !== dayStamp) {
+                    dayStamp = new Date(now).getDate();
+                    todayBaseMs = getTotalDurationToday(tracker.entries);
+                    todayAnchor = now;
+                }
+                totalToday.setText(formatDuration(todayBaseMs + (now - todayAnchor), settings));
+            }
+
+            // keep the running segment's (and its ancestors') table durations ticking too
+            for (const {cell, baseMs} of liveBases)
+                if (cell.isConnected)
+                    cell.setText(formatDuration(baseMs + elapsedMs, settings));
+        }, 1000));
+    }
 }
 
 export function getDuration(entry: Entry): number {
@@ -493,7 +543,7 @@ function createTableSection(entry: Entry, settings: TempoSettings, indent: numbe
     return ret;
 }
 
-function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HTMLTableElement, newSegmentNameBox: TextComponent, trackerRunning: boolean, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation | null, settings: TempoSettings, indent: number, component: MarkdownRenderChild, liveCells: LiveDurationCell[]): void {
+function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HTMLTableElement, newSegmentNameBox: TextComponent, trackerRunning: boolean, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation | null, settings: TempoSettings, indent: number, component: MarkdownRenderChild, liveCells: LiveDurationCell[], scheduleCollapseSave: () => void): void {
     let entryRunning = getRunningEntry(tracker.entries) == entry;
     let row = table.createEl("tr");
     row.style.setProperty("--depth", String(indent));
@@ -523,13 +573,12 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
         .setClass("clickable-icon")
         .setClass("tempo-expand-button")
         .setIcon(`chevron-${entry.collapsed ? "left" : "down"}`)
-        .onClick(async () => {
-            if (entry.collapsed) {
-                entry.collapsed = undefined;
-            } else {
-                entry.collapsed = true;
-            }
-            await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        .onClick(() => {
+            entry.collapsed = entry.collapsed ? undefined : true;
+            // flip the chevron immediately; the debounced write persists it and
+            // the resulting re-render shows/hides the sub-entries
+            void expandButton.setIcon(`chevron-${entry.collapsed ? "left" : "down"}`);
+            scheduleCollapseSave();
         });
     if (!entry.subEntries)
         expandButton.buttonEl.setCssProps({ visibility: "hidden" })
@@ -638,7 +687,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
 
     if (entry.subEntries && !entry.collapsed) {
         for (let sub of orderedEntries(entry.subEntries, settings))
-            addEditableTableRow(app, tracker, sub, table, newSegmentNameBox, trackerRunning, getFile, getSectionInfo, settings, indent + 1, component, liveCells);
+            addEditableTableRow(app, tracker, sub, table, newSegmentNameBox, trackerRunning, getFile, getSectionInfo, settings, indent + 1, component, liveCells, scheduleCollapseSave);
     }
 }
 

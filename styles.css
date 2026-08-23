@@ -851,6 +851,15 @@
     outline: 2px solid var(--background-modifier-border-focus);
 }
 
+/* chart bars are keyboard-operable too (Enter/Space toggles drill-down) */
+.tempo-stats-bar:focus {
+    outline: none;
+}
+
+.tempo-stats-bar:focus-visible {
+    outline: 2px solid var(--background-modifier-border-focus);
+}
+
 /* smooth expand/collapse via the grid-rows trick */
 .tempo-stats-lb-detail {
     display: grid;

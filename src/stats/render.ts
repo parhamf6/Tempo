@@ -4,6 +4,7 @@ import {
     DropdownComponent,
     MarkdownRenderChild,
     MarkdownSectionInformation,
+    TFile,
     TextComponent,
     ToggleComponent,
     moment,
@@ -35,7 +36,12 @@ export function displayStats(
     element.addClass("tempo-container");
     element.addClass("tempo-stats-container");
 
+    // timestamp of the last state write we issued ourselves, used to skip the
+    // modify-event echo our own save triggers (avoids double refreshes)
+    let lastSelfSaveAt = 0;
+
     const save = async (): Promise<void> => {
+        lastSelfSaveAt = Date.now();
         await saveStatsState(app, state, getFile(), getSectionInfo(), settings);
     };
 
@@ -86,7 +92,7 @@ export function displayStats(
 
             // remember ephemeral view state so background refreshes don't disturb the reader
             const uiState = captureStatsUiState(resultsSection);
-            renderResults(resultsSection, result, settings, component, {
+            renderResults(resultsSection, result, settings, {
                 selected,
                 filteredResult,
                 openTaskKey,
@@ -159,7 +165,14 @@ export function displayStats(
             window.clearTimeout(debounceHandle);
         debounceHandle = window.setTimeout(() => void refresh(), 500);
     };
-    component.registerEvent(app.vault.on("modify", () => scheduleRefresh()));
+    component.registerEvent(app.vault.on("modify", (file) => {
+        // skip the echo of our own state write (within a short window), but
+        // stay responsive to real edits — including tracker timers saved into
+        // this same note by its own blocks
+        if (file instanceof TFile && file.path === getFile() && Date.now() - lastSelfSaveAt < 1000)
+            return;
+        scheduleRefresh();
+    }));
     component.registerEvent(app.vault.on("create", () => scheduleRefresh()));
     component.registerEvent(app.vault.on("delete", (file) => {
         invalidateStatsCache(file.path);
@@ -171,6 +184,18 @@ export function displayStats(
         invalidateStatsCache(oldPath);
         scheduleRefresh();
     }));
+
+    // ONE document-level click listener per block (registered once here, not
+    // per chart render): dismisses chart tooltips when clicking outside their
+    // svg. ownerDocument keeps this correct in popout windows.
+    component.registerDomEvent(element.ownerDocument, "click", (e: MouseEvent) => {
+        const target = e.target as Node | null;
+        for (const svg of Array.from(element.querySelectorAll(".tempo-stats-chart")))
+            if (target && svg.contains(target))
+                return;
+        element.querySelectorAll(".tempo-chart-tip.is-visible").forEach(el => el.removeClass("is-visible"));
+        element.querySelectorAll(".tempo-stats-bar.is-active").forEach(el => el.removeClass("is-active"));
+    });
 
     void refresh();
 }
@@ -609,7 +634,7 @@ function addSummaryCard(container: HTMLElement, icon: string, value: string, lab
     card.createSpan({cls: "tempo-timer-label", text: label});
 }
 
-function renderResults(container: HTMLElement, result: StatsResult, settings: TempoSettings, component: MarkdownRenderChild, view: StatsDayView): void {
+function renderResults(container: HTMLElement, result: StatsResult, settings: TempoSettings, view: StatsDayView): void {
     container.empty();
 
     // when filtered to a bucket, summary cards and leaderboard show just that period
@@ -624,7 +649,7 @@ function renderResults(container: HTMLElement, result: StatsResult, settings: Te
     if (result.buckets.length === 0 || result.buckets.every(b => b.durationMs === 0)) {
         chartWrap.createDiv({cls: "tempo-empty", text: "No tracked time in this range yet."});
     } else {
-        renderBarChart(chartWrap, result.buckets, settings, component, view);
+        renderBarChart(chartWrap, result.buckets, settings, view);
     }
 
     if (view.selected) {
@@ -922,7 +947,7 @@ function renderDayPanel(container: HTMLElement, view: StatsDayView, settings: Te
     return panel;
 }
 
-function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings: TempoSettings, component: MarkdownRenderChild, view: StatsDayView): void {
+function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings: TempoSettings, view: StatsDayView): void {
     const width = 640;
     const height = 160;
     const paddingBottom = 22;
@@ -978,14 +1003,26 @@ function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings
         rect.setAttribute("height", String(barH));
         rect.setAttribute("rx", "3");
         rect.setAttribute("class", "tempo-stats-bar");
+        // keyboard-operable like the donut slices (Electron/Chromium handles
+        // SVG focus); Enter/Space mirrors the click behavior
+        rect.setAttribute("role", "button");
+        rect.setAttribute("tabindex", "0");
         rect.setAttribute("aria-label", `${bucket.label}: ${formatDuration(bucket.durationMs, settings)}`);
         rect.toggleClass("is-selected", view.selected?.start === bucket.start);
 
         rect.addEventListener("mouseenter", () => showTip(rect, bucket));
         rect.addEventListener("mouseleave", hideTip);
-        rect.addEventListener("click", () => {
+
+        const activateBar = (): void => {
             hideTip();
             view.onSelect(bucket);
+        };
+        rect.addEventListener("click", activateBar);
+        rect.addEventListener("keydown", (e: KeyboardEvent) => {
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                activateBar();
+            }
         });
         svg.appendChild(rect);
 
@@ -1000,11 +1037,7 @@ function renderBarChart(container: HTMLElement, buckets: StatsBucket[], settings
         }
     });
 
-    // tap/click anywhere outside the chart dismisses a pinned tooltip
-    component.registerDomEvent(document, "click", (e: MouseEvent) => {
-        if (!e.target || !svg.contains(e.target as Node))
-            hideTip();
-    });
+    // (document-level click dismissal is registered once in displayStats)
 
     container.appendChild(svg);
 }
