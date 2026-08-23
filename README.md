@@ -14,7 +14,9 @@ the tracked time from the sources _you_ choose into a clear summary: total time,
 number of tracked tasks, and number of files scanned.
 
 
-<video src="tempo-demo-v1.1.1-compressed.mp4" controls muted playsinline width="100%"></video>
+https://github.com/user-attachments/assets/a647601d-fc72-4f04-be9d-8b87554e5974
+
+
 
 ---
 
