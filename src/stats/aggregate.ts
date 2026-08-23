@@ -30,63 +30,81 @@ export function resolveRange(range: StatsRange): { start: Moment, end: Moment } 
     };
 }
 
-// A leaf entry with its timestamps parsed to epoch ms once per computation, so
-// aggregating across buckets is pure numeric clipping instead of constructing
-// moment objects for every entry × bucket combination.
-interface PreparedEntry {
+// A top-level segment with its timestamps parsed to epoch ms once per
+// computation, so aggregating across buckets is pure numeric clipping instead
+// of constructing moment objects for every entry × bucket combination.
+// Grouping happens at the TOP level on purpose: a segment with sub-entries
+// reports its whole subtree under its own name — leaves like "Part 2" must
+// never surface as separate leaderboard rows.
+interface PreparedSegment {
     name: string;
     key: string;
-    startMs: number;
-    endMs: number; // "now" for entries that are still running
+    intervals: {startMs: number, endMs: number}[]; // flattened leaves; endMs = "now" while running
 }
 
-function prepareEntries(entries: Entry[]): PreparedEntry[] {
-    const out: PreparedEntry[] = [];
-    const walk = (list: Entry[]): void => {
-        for (const entry of list) {
-            if (entry.subEntries) {
-                walk(entry.subEntries);
-            } else if (entry.startTime) {
-                out.push({
-                    name: entry.name,
-                    key: entry.name.trim().toLowerCase(),
-                    startMs: moment(entry.startTime).valueOf(),
-                    // snapshot "now" once per computation so every bucket sees
-                    // a consistent picture of running entries
-                    endMs: entry.endTime ? moment(entry.endTime).valueOf() : Date.now()
-                });
-            }
+function prepareSegments(entries: Entry[]): PreparedSegment[] {
+    const out: PreparedSegment[] = [];
+    const now = Date.now();
+
+    const collectIntervals = (entry: Entry, intervals: {startMs: number, endMs: number}[]): void => {
+        if (entry.subEntries) {
+            for (const sub of entry.subEntries)
+                collectIntervals(sub, intervals);
+            return;
         }
+        if (!entry.startTime)
+            return;
+        intervals.push({
+            startMs: moment(entry.startTime).valueOf(),
+            // snapshot "now" once per computation so every bucket sees
+            // a consistent picture of running entries
+            endMs: entry.endTime ? moment(entry.endTime).valueOf() : now
+        });
     };
-    walk(entries);
+
+    for (const entry of entries) {
+        const intervals: {startMs: number, endMs: number}[] = [];
+        collectIntervals(entry, intervals);
+        if (intervals.length === 0)
+            continue;
+        out.push({
+            name: entry.name,
+            key: entry.name.trim().toLowerCase(),
+            intervals
+        });
+    }
     return out;
 }
 
-function overlapMs(e: PreparedEntry, rangeStartMs: number, rangeEndMs: number): number {
-    if (e.endMs <= rangeStartMs || e.startMs >= rangeEndMs)
-        return 0;
-    return Math.max(0, Math.min(e.endMs, rangeEndMs) - Math.max(e.startMs, rangeStartMs));
+function overlapMs(intervals: {startMs: number, endMs: number}[], rangeStartMs: number, rangeEndMs: number): number {
+    let sum = 0;
+    for (const iv of intervals) {
+        if (iv.endMs <= rangeStartMs || iv.startMs >= rangeEndMs)
+            continue;
+        sum += Math.max(0, Math.min(iv.endMs, rangeEndMs) - Math.max(iv.startMs, rangeStartMs));
+    }
+    return sum;
 }
 
-// One pass over the prepared entries: sums overlapping durations into `total`
+// One pass over the prepared segments: sums overlapping durations into `total`
 // and per-task totals simultaneously (bucket totals and their leaderboards
 // therefore always agree by construction).
 type TotalMap = Map<string, StatsLeaderboardRow>;
 
-function accumulate(totals: TotalMap, prepared: PreparedEntry[], startMs: number, endMs: number): number {
+function accumulate(totals: TotalMap, prepared: PreparedSegment[], startMs: number, endMs: number): number {
     let total = 0;
-    for (const e of prepared) {
-        const ms = overlapMs(e, startMs, endMs);
+    for (const seg of prepared) {
+        const ms = overlapMs(seg.intervals, startMs, endMs);
         if (ms <= 0)
             continue;
         total += ms;
-        if (!e.key)
+        if (!seg.key)
             continue;
-        const existing = totals.get(e.key);
+        const existing = totals.get(seg.key);
         if (existing)
             existing.durationMs += ms;
         else
-            totals.set(e.key, {name: e.name.trim(), durationMs: ms});
+            totals.set(seg.key, {name: seg.name.trim(), durationMs: ms});
     }
     return total;
 }
@@ -96,7 +114,7 @@ function leaderboardFrom(totals: TotalMap): StatsLeaderboardRow[] {
         .sort((a, b) => b.durationMs - a.durationMs);
 }
 
-function buildBuckets(prepared: PreparedEntry[], start: Moment, end: Moment): StatsBucket[] {
+function buildBuckets(prepared: PreparedSegment[], start: Moment, end: Moment): StatsBucket[] {
     const spanDays = end.diff(start, "days") + 1;
     const buckets: StatsBucket[] = [];
 
@@ -145,7 +163,7 @@ function buildBuckets(prepared: PreparedEntry[], start: Moment, end: Moment): St
 
 export function computeStats(entries: Entry[], range: StatsRange, fileCount: number): StatsResult {
     const {start, end} = resolveRange(range);
-    const prepared = prepareEntries(entries);
+    const prepared = prepareSegments(entries);
 
     const totals: TotalMap = new Map();
     const totalMs = accumulate(totals, prepared, start.valueOf(), end.valueOf());
@@ -161,7 +179,7 @@ export function computeStats(entries: Entry[], range: StatsRange, fileCount: num
 // Aggregates stats for an explicit period, used when the view is filtered
 // down to a single chart bucket via the drill-down panel.
 export function computeStatsForPeriod(entries: Entry[], startMs: number, endMs: number, fileCount: number): StatsResult {
-    const prepared = prepareEntries(entries);
+    const prepared = prepareSegments(entries);
 
     const totals: TotalMap = new Map();
     const totalMs = accumulate(totals, prepared, startMs, endMs);
