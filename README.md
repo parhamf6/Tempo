@@ -225,14 +225,9 @@ bundled sample vault.
 
 ## 🙏 Credits
 
-This project is based on
-[ObsidianSimpleTimeTracker](https://github.com/Ellpeck/ObsidianSimpleTimeTracker) by
-[Ellpeck](https://github.com/Ellpeck), and is licensed under the MIT License.
-
-This version (Tempo) contains substantial modifications, customizations, and
-additional functionality — most notably the `tempo-stats` aggregation blocks,
-regex folder scanning, and the adoption of Obsidian's declarative settings API —
-that are not present in the original project.
+Tempo is built on top of [ObsidianSimpleTimeTracker](https://github.com/Ellpeck/ObsidianSimpleTimeTracker)
+by [Ellpeck](https://github.com/Ellpeck) (MIT licensed) — thanks for such a solid foundation
+to build on, and for kindly approving this fork.
 
 ## 📄 License
 
