@@ -1,4 +1,5 @@
-import {moment, MarkdownSectionInformation, ButtonComponent, TextComponent, TFile, MarkdownRenderer, Component, MarkdownRenderChild, App, setIcon} from "obsidian";
+import {MarkdownSectionInformation, ButtonComponent, TextComponent, TFile, MarkdownRenderer, Component, MarkdownRenderChild, App, setIcon} from "obsidian";
+import {moment} from "./moment";
 import {TempoSettings} from "./settings";
 import {ConfirmModal} from "./confirm-modal";
 

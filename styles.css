@@ -294,8 +294,9 @@
 }
 
 /* ---------- Row action icons: color-coded by what they do ---------- */
-.tempo-table-buttons {
-    text-align: right !important;
+/* higher specificity (instead of !important) so themes can still override */
+.tempo-container .tempo-table td.tempo-table-buttons {
+    text-align: right;
     white-space: nowrap;
     position: sticky;
     right: 0;
@@ -408,16 +409,6 @@
 .tempo-container input:focus-visible {
     outline: 2px solid var(--interactive-accent);
     outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .tempo-timer-current .tempo-timer-icon {
-        animation: none;
-    }
-    .tempo-container * {
-        transition: none !important;
-        animation: none !important;
-    }
 }
 
 /* ---------- Small screens ---------- */
@@ -1119,4 +1110,41 @@ details.tempo-breakdown[open] .tempo-breakdown-body {
     font-size: 0.78em;
     line-height: 1.5;
     color: var(--text-faint);
+}
+
+/* ---------- Reduced motion ----------
+   Explicit selectors prefixed with .tempo-container (placed last in the
+   file) out-specify every transition/animation rule above, so no
+   !important is needed to disable motion. */
+@media (prefers-reduced-motion: reduce) {
+    .tempo-timer-current .tempo-timer-icon,
+    .tempo-stats-day-panel.is-entering,
+    .tempo-stats-day-panel.is-closing,
+    details.tempo-breakdown[open] .tempo-breakdown-body,
+    .tempo-stats-range-custom {
+        animation: none;
+    }
+
+    .tempo-container .tempo-controls,
+    .tempo-container .tempo-btn.clickable-icon,
+    .tempo-container .tempo-table tr,
+    .tempo-container .tempo-table-buttons .clickable-icon,
+    .tempo-container .tempo-bottom button,
+    .tempo-container .tempo-stats-add-row button,
+    .tempo-container .tempo-stats-range-label.is-parked,
+    .tempo-container .tempo-stats-range-pill,
+    .tempo-container .tempo-chart-tip,
+    .tempo-container .tempo-stats-bar,
+    .tempo-container .tempo-breakdown-summary-icon,
+    .tempo-container .tempo-breakdown-slice,
+    .tempo-container .tempo-stats-lb-detail,
+    .tempo-container .tempo-stats-lb-bar {
+        animation: none;
+        transition: none;
+    }
+
+    /* same specificity as the @supports rule above; placed later so it wins */
+    details.tempo-breakdown::details-content {
+        transition: none;
+    }
 }

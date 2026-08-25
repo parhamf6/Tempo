@@ -7,9 +7,9 @@ import {
     TFile,
     TextComponent,
     ToggleComponent,
-    moment,
     setIcon
 } from "obsidian";
+import {moment} from "../moment";
 import {TempoSettings} from "../settings";
 import {formatDuration} from "../tracker";
 import {invalidateStatsCache, scanEntries} from "./scan";

@@ -1,6 +1,7 @@
+import tseslint from 'typescript-eslint';
 import obsidianmd from 'eslint-plugin-obsidianmd';
 import globals from 'globals';
-import {globalIgnores, defineConfig} from 'eslint/config';
+import { globalIgnores, defineConfig } from 'eslint/config'; // <-- Added defineConfig
 
 export default defineConfig(
     globalIgnores([
@@ -13,7 +14,7 @@ export default defineConfig(
         'package.json',
         'package-lock.json',
         'tsconfig.json',
-        "test-vault"
+        'test-vault',
     ]),
     {
         languageOptions: {
@@ -29,5 +30,6 @@ export default defineConfig(
             },
         },
     },
+    ...tseslint.configs.recommendedTypeChecked,
     ...obsidianmd.configs.recommended,
 );

@@ -1,8 +1,6 @@
-import {moment} from "obsidian";
 import {Entry} from "../tracker";
+import {Moment, moment} from "../moment";
 import {StatsBucket, StatsLeaderboardRow, StatsRange, StatsResult} from "./types";
-
-type Moment = ReturnType<typeof moment>;
 
 export function resolveRange(range: StatsRange): { start: Moment, end: Moment } {
     // how many days the window is parked in the past via the date navigator
