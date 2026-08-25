@@ -14,8 +14,7 @@ the tracked time from the sources _you_ choose into a clear summary: total time,
 number of tracked tasks, and number of files scanned.
 
 
-https://github.com/user-attachments/assets/a647601d-fc72-4f04-be9d-8b87554e5974
-
+https://github.com/user-attachments/assets/33966c3e-238d-4aa4-9967-61d2681e93fa
 
 
 ---
