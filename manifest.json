@@ -1,7 +1,7 @@
 {
   "id": "tempo",
   "name": "Tempo",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "minAppVersion": "1.13.0",
   "description": "Time tracking that lives in your notes and survives restarts — then slice the stats by any files, folders, or dates you choose.",
   "author": "Parham Forati",
