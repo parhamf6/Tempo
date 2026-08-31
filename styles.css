@@ -148,6 +148,22 @@
     color: var(--text-muted);
 }
 
+/* running-segment breadcrumb in the Current card: names and "›" separators
+   flow as one line of inline text so a long chain truncates with a single
+   ellipsis; the full path is in the label's title tooltip */
+.tempo-timer-label .tempo-timer-label-sep {
+    color: var(--text-faint);
+    padding: 0 0.35em;
+}
+
+.tempo-timer-current .tempo-timer-label {
+    display: block;
+    max-width: 190px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* the "Current" card only ever renders while a timer is actually running,
    so it always gets the live accent treatment */
 .tempo-timer-current {

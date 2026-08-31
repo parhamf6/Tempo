@@ -166,7 +166,10 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
     let currentDiv = timer.createDiv({ cls: "tempo-timer tempo-timer-current" });
     setIcon(currentDiv.createSpan({ cls: "tempo-timer-icon" }), "timer");
     let current = currentDiv.createSpan(timeStyle);
-    currentDiv.createSpan({ text: "Current", cls: "tempo-timer-label" });
+    let currentLabel = currentDiv.createSpan({ cls: "tempo-timer-label" });
+    // visible only while something runs: the static "Current" text becomes
+    // a breadcrumb of the running segment, e.g. "Work › Part 2"
+    setRunningLabel(currentLabel, tracker.entries);
     let totalDiv = timer.createDiv({ cls: "tempo-timer" });
     setIcon(totalDiv.createSpan({ cls: "tempo-timer-icon" }), "sigma");
     let total = totalDiv.createSpan(timeStyle);
@@ -370,6 +373,24 @@ export function getRunningEntry(entries: Entry[]): Entry | undefined {
     return undefined;
 }
 
+// the chain of segment names from the top-level ancestor down to the
+// running leaf, e.g. ["Work", "Part 2"]; undefined when nothing runs.
+// Mirrors getRunningEntry's traversal so the two can never disagree about
+// what is running.
+export function getRunningChain(entries: Entry[]): string[] | undefined {
+    for (let entry of entries) {
+        if (entry.subEntries) {
+            let chain = getRunningChain(entry.subEntries);
+            if (chain)
+                return [entry.name, ...chain];
+        } else if (entry.startTime) {
+            if (!entry.endTime)
+                return [entry.name];
+        }
+    }
+    return undefined;
+}
+
 // true when this entry's subtree contains the running leaf, i.e. its displayed
 // duration grows in real time until the tracker is stopped
 function hasRunningLeaf(entry: Entry): boolean {
@@ -560,6 +581,23 @@ function moveEntryByOffset(entries: Entry[], target: Entry, offset: -1 | 1, sett
     [display[from], display[to]] = [display[to]!, display[from]!];
     writeDisplayOrder(parent, display);
     return true;
+}
+
+// fills the Current card's label with the running segment breadcrumb:
+// one span per name, joined by faint "›" separators. Plain text on purpose —
+// the micro-label style would mangle rendered markdown. The full chain also
+// goes into the title so truncated labels stay readable on hover.
+function setRunningLabel(label: HTMLElement, entries: Entry[]): void {
+    const chain = getRunningChain(entries);
+    if (!chain)
+        return; // nothing runs; the card is hidden anyway
+    label.replaceChildren();
+    chain.forEach((name, i) => {
+        if (i > 0)
+            label.createSpan({ text: "›", cls: "tempo-timer-label-sep" });
+        label.createSpan({ text: name, cls: "tempo-timer-label-name" });
+    });
+    label.title = chain.join(" › ");
 }
 
 function setCountdownValues(tracker: Tracker, current: HTMLElement, total: HTMLElement, totalToday: HTMLElement, currentDiv: HTMLDivElement, settings: TempoSettings): void {
