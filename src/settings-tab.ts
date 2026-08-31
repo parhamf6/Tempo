@@ -39,6 +39,38 @@ export class TempoSettingsTab extends PluginSettingTab {
                 }
             },
             {
+                name: "Default segment name",
+                desc: createFragment(f => {
+                    f.createSpan({text: "Name for new top-level segments when none is typed. Every run of # becomes the segment number, padded to the number of # characters: "});
+                    f.createEl("code", {text: "Segment #"});
+                    f.createSpan({text: ", "});
+                    f.createEl("code", {text: "Part ###"});
+                    f.createSpan({text: ", "});
+                    f.createEl("code", {text: "## Part"});
+                    f.createSpan({text: "."});
+                }),
+                control: {
+                    key: "segmentNameTemplate",
+                    type: "text",
+                    defaultValue: defaultSettings.segmentNameTemplate
+                }
+            },
+            {
+                name: "Default sub-entry name",
+                desc: createFragment(f => {
+                    f.createSpan({text: "Name for new sub-entries created with Continue when none is typed. Same # syntax: "});
+                    f.createEl("code", {text: "Part #"});
+                    f.createSpan({text: ", "});
+                    f.createEl("code", {text: "Part ###"});
+                    f.createSpan({text: "."});
+                }),
+                control: {
+                    key: "subEntryNameTemplate",
+                    type: "text",
+                    defaultValue: defaultSettings.subEntryNameTemplate
+                }
+            },
+            {
                 name: "Fine-grained durations",
                 desc: "Whether durations should include days, months and years. If this is disabled, additional time units will be displayed as part of the hours.",
                 control: {
@@ -115,7 +147,7 @@ export class TempoSettingsTab extends PluginSettingTab {
     async setControlValue(key: TempoSettingKey, value: unknown): Promise<void> {
         const settings = this.plugin.settings as Record<TempoSettingKey, unknown>;
         // Mirror the previous behavior: empty text-like values fall back to the default.
-        if ((key === "timestampFormat" || key === "csvDelimiter") && typeof value === "string" && value.length === 0) {
+        if ((key === "timestampFormat" || key === "csvDelimiter" || key === "segmentNameTemplate" || key === "subEntryNameTemplate") && typeof value === "string" && value.length === 0) {
             settings[key] = defaultSettings[key];
         } else {
             settings[key] = value;

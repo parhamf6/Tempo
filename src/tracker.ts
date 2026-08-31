@@ -137,7 +137,7 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
             if (running) {
                 endRunningEntry(tracker);
             } else {
-                startNewEntry(tracker, newSegmentNameBox.getValue());
+                startNewEntry(tracker, newSegmentNameBox.getValue(), settings);
             }
             await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
         });
@@ -150,7 +150,7 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
     newSegmentNameBox.inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
         if (e.key === "Enter" && !running) {
             e.preventDefault();
-            startNewEntry(tracker, newSegmentNameBox.getValue());
+            startNewEntry(tracker, newSegmentNameBox.getValue(), settings);
             void saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
         }
     });
@@ -493,22 +493,33 @@ export function formatDuration(totalTime: number, settings: TempoSettings): stri
 }
 
 
-function startSubEntry(entry: Entry, name: string): void {
+// fills a name template: every run of # in the template becomes the counter,
+// zero-padded to the run's length ("Part #" → "Part 4", "PART ###" → "PART 004",
+// "## part" → "04 part")
+export function formatNameTemplate(template: string, counter: number): string {
+    return template.replace(/#+/g, digits => String(counter).padStart(digits.length, "0"));
+}
+
+function startSubEntry(entry: Entry, name: string, settings: TempoSettings): void {
     // if this entry is not split yet, we add its time as a sub-entry instead
     if (!entry.subEntries) {
-        entry.subEntries = [{ ...entry, name: `Part 1` }];
+        entry.subEntries = [{ ...entry, name: formatNameTemplate(settings.subEntryNameTemplate, 1) }];
         entry.startTime = undefined;
         entry.endTime = undefined;
     }
 
     if (!name)
-        name = `Part ${entry.subEntries.length + 1}`;
+        name = formatNameTemplate(settings.subEntryNameTemplate, entry.subEntries.length + 1);
     entry.subEntries.push({ name: name, startTime: moment().toISOString() });
 }
 
-function startNewEntry(tracker: Tracker, name: string): void {
-    if (!name)
-        name = `Segment ${tracker.entries.length + 1}`;
+function startNewEntry(tracker: Tracker, name: string, settings: TempoSettings): void {
+    if (!name) {
+        name = formatNameTemplate(settings.segmentNameTemplate, tracker.entries.length + 1);
+        // a hand-emptied template must not create unnamed segments
+        if (!name)
+            name = `Segment ${tracker.entries.length + 1}`;
+    }
     let entry: Entry = { name: name, startTime: moment().toISOString() };
     tracker.entries.push(entry);
 }
@@ -828,7 +839,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
                 // if we're using a template version of a tracker without a start time, start now
                 entry.startTime = moment().toISOString();
             } else {
-                startSubEntry(entry, newSegmentNameBox.getValue());
+                startSubEntry(entry, newSegmentNameBox.getValue(), settings);
             }
             await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
         });
