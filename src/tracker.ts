@@ -155,6 +155,25 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
         }
     });
 
+    // reset: wipe the whole tracker (or just zero its timestamps, keeping
+    // segment names as a reusable template) after an explicit confirmation
+    new ButtonComponent(controls)
+        .setClass("clickable-icon")
+        .setClass("tempo-btn-reset")
+        .setIcon("rotate-ccw")
+        .setTooltip("Reset tracker")
+        .setDisabled(tracker.entries.length === 0)
+        .onClick(async () => {
+            const choice = await showResetConfirm(app);
+            if (choice === "delete")
+                tracker.entries = [];
+            else if (choice === "clearTimes")
+                clearEntryTimes(tracker.entries);
+            else
+                return;
+            await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        });
+
     // add timers
     let timeStyle: DomElementInfo = {
         cls: "tempo-timer-time",
@@ -498,6 +517,34 @@ function endRunningEntry(tracker: Tracker): void {
     let entry = getRunningEntry(tracker.entries);
     if (entry)
         entry.endTime = moment().toISOString();
+}
+
+// recursively strips all timestamps, keeping names (and the sub-entry
+// structure) intact so the tracker becomes a reusable template
+function clearEntryTimes(entries: Entry[]): void {
+    for (let entry of entries) {
+        entry.startTime = undefined;
+        entry.endTime = undefined;
+        entry.collapsed = undefined;
+        if (entry.subEntries)
+            clearEntryTimes(entry.subEntries);
+    }
+}
+
+// which reset action the user picked in the reset confirmation
+type ResetChoice = "delete" | "clearTimes" | undefined;
+
+function showResetConfirm(app: App): Promise<ResetChoice> {
+    return new Promise((resolve) => {
+        const modal = new ConfirmModal(
+            app,
+            "Reset this tracker? The running segment will be stopped and removed too.",
+            choice => resolve(choice === true ? "delete" : choice === "extra" ? "clearTimes" : undefined),
+            "Delete all",
+            "Clear times only"
+        );
+        modal.open();
+    });
 }
 
 function removeEntry(entries: Entry[], toRemove: Entry): boolean {
@@ -876,7 +923,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
 
 function showConfirm(app: App, message: string): Promise<boolean> {
     return new Promise((resolve) => {
-        const modal = new ConfirmModal(app, message, resolve);
+        const modal = new ConfirmModal(app, message, choice => resolve(choice === true));
         modal.open();
     });
 }

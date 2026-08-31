@@ -1,19 +1,33 @@
 import {App, Modal} from "obsidian";
 
+// what the user picked: true/false map to the primary/confirm and cancel
+// actions, "extra" to the optional secondary action (e.g. a softer
+// alternative to deletion)
+export type ConfirmChoice = boolean | "extra";
+
 export class ConfirmModal extends Modal {
     // Message to show in the modal
     message: string;
 
+    // Label of the primary (destructive) button
+    confirmText: string;
+
+    // When set, an additional neutral button is shown between cancel and
+    // the primary action, for a second way to proceed
+    extraText?: string;
+
     // Callback to run on user choice
-    callback: (choice: boolean) => void;
+    callback: (choice: ConfirmChoice) => void;
 
     // Whether an option was picked
     picked: boolean = false;
 
-    constructor(app: App, message: string, callback: (choice: boolean) => void) {
+    constructor(app: App, message: string, callback: (choice: ConfirmChoice) => void, confirmText: string = "Delete", extraText?: string) {
         super(app);
         this.message = message;
         this.callback = callback;
+        this.confirmText = confirmText;
+        this.extraText = extraText;
     }
 
     onOpen(): void {
@@ -35,8 +49,20 @@ export class ConfirmModal extends Modal {
             this.callback(false);
         });
 
+        if (this.extraText) {
+            const extraButton = actions.createEl("button", {
+                text: this.extraText,
+                cls: "tempo-confirm-extra",
+            });
+            extraButton.addEventListener("click", () => {
+                this.picked = true;
+                this.close();
+                this.callback("extra");
+            });
+        }
+
         const okButton = actions.createEl("button", {
-            text: "Delete",
+            text: this.confirmText,
             cls: "tempo-confirm-ok",
         });
         okButton.addEventListener("click", () => {
