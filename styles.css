@@ -260,6 +260,81 @@
     min-width: 0;
 }
 
+/* ---------- Drag & drop reordering ---------- */
+/* positioned ancestor for the drop indicator line */
+.tempo-table-wrap {
+    position: relative;
+}
+
+.tempo-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    cursor: grab;
+    color: var(--text-faint);
+    opacity: 0;
+    touch-action: none;
+    margin-inline-end: 2px;
+    transition: opacity 120ms ease, color 120ms ease;
+}
+
+.tempo-drag-handle svg {
+    width: 13px;
+    height: 13px;
+}
+
+.tempo-table tr:hover .tempo-drag-handle {
+    opacity: 1;
+}
+
+.tempo-drag-handle:hover {
+    color: var(--text-muted);
+}
+
+.tempo-drag-handle:active {
+    cursor: grabbing;
+}
+
+/* touch devices never hover: keep the handle faintly visible */
+@media (hover: none) {
+    .tempo-drag-handle {
+        opacity: 0.55;
+    }
+}
+
+/* the dragged row dims in place while the insertion line previews the drop */
+.tempo-row-dragging {
+    opacity: 0.35;
+}
+
+body.tempo-dragging {
+    cursor: grabbing;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.tempo-drop-indicator {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    height: 2px;
+    border-radius: 999px;
+    background: var(--interactive-accent);
+    pointer-events: none;
+    z-index: 3;
+}
+
+.tempo-drop-indicator::before {
+    content: "";
+    position: absolute;
+    left: -4px;
+    top: -2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--interactive-accent);
+}
+
 .tempo-table .clickable-icon {
     display: inline-flex;
     align-items: center;
@@ -315,8 +390,25 @@
     opacity: 1;
 }
 
+/* disabled move buttons (already at the top/bottom) stay dimmed instead of
+   popping in at full opacity */
+.tempo-table tr:hover .tempo-table-buttons .clickable-icon:disabled,
+.tempo-row-running .tempo-table-buttons .clickable-icon:disabled,
+.tempo-table-buttons .clickable-icon:disabled:focus-visible {
+    opacity: 0.25;
+}
+
 .tempo-table-buttons .clickable-icon:hover {
     transform: scale(1.08);
+}
+
+/* move up/down → neutral muted, they only reorder */
+.tempo-action-move {
+    color: var(--text-muted);
+}
+
+.tempo-action-move:hover {
+    background: var(--background-modifier-hover);
 }
 
 /* play / continue → green, becomes orange while it's the running entry */
@@ -1128,6 +1220,7 @@ details.tempo-breakdown[open] .tempo-breakdown-body {
     .tempo-container .tempo-controls,
     .tempo-container .tempo-btn.clickable-icon,
     .tempo-container .tempo-table tr,
+    .tempo-container .tempo-drag-handle,
     .tempo-container .tempo-table-buttons .clickable-icon,
     .tempo-container .tempo-bottom button,
     .tempo-container .tempo-stats-add-row button,

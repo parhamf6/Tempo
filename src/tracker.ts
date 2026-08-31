@@ -2,6 +2,7 @@ import {MarkdownSectionInformation, ButtonComponent, TextComponent, TFile, Markd
 import {moment} from "./moment";
 import {TempoSettings} from "./settings";
 import {ConfirmModal} from "./confirm-modal";
+import {makeRowDraggable} from "./drag";
 
 export interface Tracker {
     entries: Entry[];
@@ -217,8 +218,10 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
         }
     };
     if (tracker.entries.length > 0) {
-        // add table
-        let table = element.createEl("table", { cls: "tempo-table" });
+        // add table (wrapped so the drag-drop insertion line can be
+        // positioned absolutely relative to the table)
+        let tableWrap = element.createDiv({ cls: "tempo-table-wrap" });
+        let table = tableWrap.createEl("table", { cls: "tempo-table" });
         table.createEl("tr").append(
             createEl("th", { text: "Segment" }),
             createEl("th", { text: "Start time" }),
@@ -497,6 +500,68 @@ function removeEntry(entries: Entry[], toRemove: Entry): boolean {
     return false;
 }
 
+// returns the sibling array (tracker.entries itself or some entry's
+// subEntries) that directly contains the target entry
+function findParentEntry(entries: Entry[], target: Entry): Entry[] | undefined {
+    if (entries.contains(target))
+        return entries;
+    for (let entry of entries) {
+        if (entry.subEntries) {
+            let parent = findParentEntry(entry.subEntries, target);
+            if (parent)
+                return parent;
+        }
+    }
+    return undefined;
+}
+
+// writes a display-ordered permutation back into the storage array
+// element-wise, preserving entry object identity
+function writeDisplayOrder(parent: Entry[], display: Entry[]): void {
+    for (let i = 0; i < display.length; i++)
+        parent[i] = display[i]!;
+}
+
+// reorders an entry among its siblings. All positions are in display space
+// (the order shown in the table, i.e. orderedEntries()), so this stays
+// correct when reverseSegmentOrder is on. `insertBefore` is the index to
+// insert at within the sibling list excluding the target itself (that is
+// how the drop indicator counts boundaries), 0..siblingCount-1.
+// Returns whether anything changed.
+function reorderEntry(entries: Entry[], target: Entry, insertBefore: number, settings: TempoSettings): boolean {
+    const parent = findParentEntry(entries, target);
+    if (!parent)
+        return false;
+    const display = orderedEntries(parent, settings);
+    const from = display.indexOf(target);
+    // the boundary at the top of the row that follows the target is the
+    // slot it already occupies; every other boundary is a real move
+    if (from < 0 || insertBefore < 0 || insertBefore > display.length - 1 ||
+        insertBefore === from)
+        return false;
+    const next = display.slice();
+    next.splice(from, 1);
+    next.splice(insertBefore, 0, target);
+    writeDisplayOrder(parent, next);
+    return true;
+}
+
+// moves an entry one slot up (-1) or down (+1) in display order among its
+// siblings. Returns whether anything changed.
+function moveEntryByOffset(entries: Entry[], target: Entry, offset: -1 | 1, settings: TempoSettings): boolean {
+    const parent = findParentEntry(entries, target);
+    if (!parent)
+        return false;
+    const display = orderedEntries(parent, settings).slice();
+    const from = display.indexOf(target);
+    const to = from + offset;
+    if (from < 0 || to < 0 || to >= display.length)
+        return false;
+    [display[from], display[to]] = [display[to]!, display[from]!];
+    writeDisplayOrder(parent, display);
+    return true;
+}
+
 function setCountdownValues(tracker: Tracker, current: HTMLElement, total: HTMLElement, totalToday: HTMLElement, currentDiv: HTMLDivElement, settings: TempoSettings): void {
     let running = getRunningEntry(tracker.entries);
     if (running && !running.endTime) {
@@ -582,8 +647,14 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
     if (entryRunning)
         row.addClass("tempo-row-running");
 
-    let nameField = new EditableField(row, indent, entry.name);
+    // the depth indent lives on the wrap instead of the label so the drag
+    // handle sits at the row start, clear of the tree-connector lines that
+    // .tempo-subrow draws inside the indent space
+    let nameField = new EditableField(row, 0, entry.name);
     let nameWrap = nameField.cell.createDiv({ cls: "tempo-name-wrap" });
+    nameWrap.style.marginLeft = indent ? `${indent * 1.4}em` : "0";
+    let dragHandle = nameWrap.createSpan({ cls: "tempo-drag-handle", attr: {"aria-hidden": "true"} });
+    setIcon(dragHandle, "grip-vertical");
     nameWrap.appendChild(nameField.label);
     let startField = new EditableTimestampField(row, entry.startTime!, settings);
     let endField = new EditableTimestampField(row, entry.endTime!, settings);
@@ -614,8 +685,51 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
     if (!entry.subEntries)
         expandButton.buttonEl.setCssProps({ visibility: "hidden" })
 
+    makeRowDraggable({
+        handle: dragHandle,
+        row: row,
+        wrap: table.parentElement as HTMLElement,
+        isEditing: () => nameField.editing(),
+        getSiblingRows: () => {
+            const parent = findParentEntry(tracker.entries, entry);
+            if (!parent)
+                return [];
+            return orderedEntries(parent, settings)
+                .map(sub => visibility.rowByEntry.get(sub))
+                .filter((subRow): subRow is HTMLTableRowElement => subRow !== undefined);
+        },
+        onDrop: insertBefore => {
+            // hidden rows belong to collapsed branches, which the whole
+            // sibling level shares: a visible row never has hidden siblings
+            if (reorderEntry(tracker.entries, entry, insertBefore, settings))
+                void saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        }
+    });
+
     let entryButtons = row.createEl("td");
     entryButtons.addClass("tempo-table-buttons");
+    const parentList = findParentEntry(tracker.entries, entry);
+    const displayIndex = parentList ? orderedEntries(parentList, settings).indexOf(entry) : 0;
+    void new ButtonComponent(entryButtons)
+        .setClass("clickable-icon")
+        .setClass("tempo-action-move")
+        .setTooltip("Move up")
+        .setIcon("chevron-up")
+        .setDisabled(displayIndex <= 0)
+        .onClick(async () => {
+            if (moveEntryByOffset(tracker.entries, entry, -1, settings))
+                await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        });
+    void new ButtonComponent(entryButtons)
+        .setClass("clickable-icon")
+        .setClass("tempo-action-move")
+        .setTooltip("Move down")
+        .setIcon("chevron-down")
+        .setDisabled(displayIndex < 0 || displayIndex >= (parentList ? parentList.length : 1) - 1)
+        .onClick(async () => {
+            if (moveEntryByOffset(tracker.entries, entry, 1, settings))
+                await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        });
     let playButton = new ButtonComponent(entryButtons)
         .setClass("clickable-icon")
         .setClass("tempo-action-play")
