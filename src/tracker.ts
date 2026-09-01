@@ -123,11 +123,38 @@ interface LiveDurationCell {
     cell: HTMLTableCellElement;
 }
 
+// per-render state shared by every row of one table build. The running entry,
+// its ancestor path, and the visibility map are resolved ONCE here so the
+// per-row build stays O(1) instead of re-walking the whole tree per row.
+interface RowContext {
+    app: App;
+    tracker: Tracker;
+    newSegmentNameBox: TextComponent;
+    runningEntry: Entry | undefined;
+    runningPath: Set<Entry>;
+    getFile: GetFile;
+    getSectionInfo: () => MarkdownSectionInformation | null;
+    settings: TempoSettings;
+    component: MarkdownRenderChild;
+    liveCells: LiveDurationCell[];
+    scheduleCollapseSave: () => void;
+    visibility: RowVisibility;
+}
+
 export function displayTracker(app: App, tracker: Tracker, element: HTMLElement, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation | null, settings: TempoSettings, component: MarkdownRenderChild): void {
 
     element.addClass("tempo-container");
+
+    // find the running entry (and its ancestor path) ONCE up front so the
+    // per-row table build below is O(1) per row instead of re-walking the
+    // whole entry tree for every row
+    const runningEntry = getRunningEntry(tracker.entries);
+    const running = !!runningEntry;
+    // entries whose displayed duration ticks live: the running leaf and every
+    // ancestor on its path (their subtree totals include the running leaf)
+    const runningPath = new Set(getRunningPath(tracker.entries));
+
     // add start/stop controls
-    let running = isRunning(tracker);
     let controls = element.createDiv({ cls: "tempo-controls" });
     let btn = new ButtonComponent(controls)
         .setClass("clickable-icon")
@@ -251,8 +278,16 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
             createEl("th", { text: "Duration" }),
             createEl("th"));
 
-        for (let entry of orderedEntries(tracker.entries, settings))
-            addEditableTableRow(app, tracker, entry, table, newSegmentNameBox, running, getFile, getSectionInfo, settings, 0, component, liveCells, scheduleCollapseSave, visibility, false);
+        const rowCtx: RowContext = {
+            app, tracker, newSegmentNameBox, runningEntry, runningPath,
+            getFile, getSectionInfo, settings, component,
+            liveCells, scheduleCollapseSave, visibility
+        };
+        // the loop supplies each row's parent list and display index, so rows
+        // never have to search the tree for their own position
+        const ordered = orderedEntries(tracker.entries, settings);
+        for (let i = 0; i < ordered.length; i++)
+            addEditableTableRow(rowCtx, ordered[i]!, table, 0, tracker.entries, i, false);
 
         // add copy buttons
         let buttons = element.createDiv({ cls: "tempo-bottom" });
@@ -274,41 +309,40 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
     // baselines captured at render time — pure arithmetic, no moment
     // objects. Any edit re-renders (and re-baselines) the whole block.
     // registerInterval clears the timer when the component unloads.
-    const runningEntry = getRunningEntry(tracker.entries);
-        if (runningEntry && !runningEntry.endTime) {
-            const baselineNow = Date.now();
-            const runningBaseMs = getDuration(runningEntry);
-            const totalBaseMs = getTotalDuration(tracker.entries);
-            const liveBases = liveCells.map(lc => ({cell: lc.cell, baseMs: getDuration(lc.entry)}));
-            let todayBaseMs = totalToday ? getTotalDurationToday(tracker.entries) : 0;
-            let todayAnchor = baselineNow;
-            let dayStamp = new Date(baselineNow).getDate();
+    if (runningEntry && !runningEntry.endTime) {
+        const baselineNow = Date.now();
+        const runningBaseMs = getDuration(runningEntry);
+        const totalBaseMs = getTotalDuration(tracker.entries);
+        const liveBases = liveCells.map(lc => ({cell: lc.cell, baseMs: getDuration(lc.entry)}));
+        let todayBaseMs = totalToday ? getTotalDurationToday(tracker.entries) : 0;
+        let todayAnchor = baselineNow;
+        let dayStamp = new Date(baselineNow).getDate();
 
-            component.registerInterval(window.setInterval(() => {
-                if (!element.isConnected)
-                    return;
-                const now = Date.now();
-                const elapsedMs = now - baselineNow;
+        component.registerInterval(window.setInterval(() => {
+            if (!element.isConnected)
+                return;
+            const now = Date.now();
+            const elapsedMs = now - baselineNow;
 
-                current.setText(formatDuration(runningBaseMs + elapsedMs, settings));
-                total.setText(formatDuration(totalBaseMs + elapsedMs, settings));
+            current.setText(formatDuration(runningBaseMs + elapsedMs, settings));
+            total.setText(formatDuration(totalBaseMs + elapsedMs, settings));
 
-                if (totalToday) {
-                    // past midnight "today" becomes a different window: recompute
-                    // from scratch so yesterday's entries drop out of the total
-                    if (new Date(now).getDate() !== dayStamp) {
-                        dayStamp = new Date(now).getDate();
-                        todayBaseMs = getTotalDurationToday(tracker.entries);
-                        todayAnchor = now;
-                    }
-                    totalToday.setText(formatDuration(todayBaseMs + (now - todayAnchor), settings));
+            if (totalToday) {
+                // past midnight "today" becomes a different window: recompute
+                // from scratch so yesterday's entries drop out of the total
+                if (new Date(now).getDate() !== dayStamp) {
+                    dayStamp = new Date(now).getDate();
+                    todayBaseMs = getTotalDurationToday(tracker.entries);
+                    todayAnchor = now;
                 }
+                totalToday.setText(formatDuration(todayBaseMs + (now - todayAnchor), settings));
+            }
 
-                // keep the running segment's (and its ancestors') table durations ticking too
-                for (const {cell, baseMs} of liveBases)
-                    if (cell.isConnected)
-                        cell.setText(formatDuration(baseMs + elapsedMs, settings));
-            }, 1000));
+            // keep the running segment's (and its ancestors') table durations ticking too
+            for (const {cell, baseMs} of liveBases)
+                if (cell.isConnected)
+                    cell.setText(formatDuration(baseMs + elapsedMs, settings));
+        }, 1000));
     }
 }
 
@@ -411,6 +445,25 @@ export function getRunningEntry(entries: Entry[]): Entry | undefined {
     return undefined;
 }
 
+// entries on the ancestor path from the tree root down to the running leaf
+// (leaf included), e.g. ["Work", "Part 2"] as entry objects; empty when
+// nothing runs. These are exactly the entries whose displayed durations tick
+// live. O(n) once per render, mirroring getRunningEntry's traversal so the
+// two can never disagree about what is running.
+function getRunningPath(entries: Entry[]): Entry[] {
+    for (const entry of entries) {
+        if (entry.subEntries) {
+            const path = getRunningPath(entry.subEntries);
+            if (path.length)
+                return [entry, ...path];
+        } else if (entry.startTime) {
+            if (!entry.endTime)
+                return [entry];
+        }
+    }
+    return [];
+}
+
 // the chain of segment names from the top-level ancestor down to the
 // running leaf, e.g. ["Work", "Part 2"]; undefined when nothing runs.
 // Mirrors getRunningEntry's traversal so the two can never disagree about
@@ -427,14 +480,6 @@ export function getRunningChain(entries: Entry[]): string[] | undefined {
         }
     }
     return undefined;
-}
-
-// true when this entry's subtree contains the running leaf, i.e. its displayed
-// duration grows in real time until the tracker is stopped
-function hasRunningLeaf(entry: Entry): boolean {
-    if (entry.subEntries)
-        return entry.subEntries.some(hasRunningLeaf);
-    return !!entry.startTime && !entry.endTime;
 }
 
 export function createMarkdownTable(tracker: Tracker, settings: TempoSettings): string {
@@ -773,8 +818,9 @@ function createTableSection(entry: Entry, settings: TempoSettings, indent: numbe
     return ret;
 }
 
-function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HTMLTableElement, newSegmentNameBox: TextComponent, trackerRunning: boolean, getFile: GetFile, getSectionInfo: () => MarkdownSectionInformation | null, settings: TempoSettings, indent: number, component: MarkdownRenderChild, liveCells: LiveDurationCell[], scheduleCollapseSave: () => void, visibility: RowVisibility, ancestorsCollapsed: boolean): void {
-    let entryRunning = getRunningEntry(tracker.entries) == entry;
+function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElement, indent: number, parentEntries: Entry[], displayIndex: number, ancestorsCollapsed: boolean): void {
+    const {app, tracker, newSegmentNameBox, runningEntry, runningPath, getFile, getSectionInfo, settings, component, liveCells, scheduleCollapseSave, visibility} = ctx;
+    const entryRunning = entry === runningEntry;
     let row = table.createEl("tr");
     visibility.rowByEntry.set(entry, row);
     // this row hides only when an ancestor is collapsed — its own flag hides
@@ -799,7 +845,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
     let endField = new EditableTimestampField(row, entry.endTime!, settings);
 
     let durationCell = row.createEl("td");
-    if (hasRunningLeaf(entry)) {
+    if (runningPath.has(entry)) {
         // this row's duration grows in real time; displayTracker keeps it ticking
         durationCell.setText(formatDuration(getDuration(entry), settings));
         liveCells.push({entry, cell: durationCell});
@@ -807,7 +853,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
         durationCell.setText(entry.endTime || entry.subEntries ? formatDuration(getDuration(entry), settings) : "");
     }
 
-    void renderNameAsMarkdown(app, nameField.label, entry.name, getFile, component);
+    void renderName(app, nameField.label, entry.name, getFile, component);
 
     let expandButton = new ButtonComponent(nameWrap)
         .setClass("clickable-icon")
@@ -829,14 +875,9 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
         row: row,
         wrap: table.parentElement as HTMLElement,
         isEditing: () => nameField.editing(),
-        getSiblingRows: () => {
-            const parent = findParentEntry(tracker.entries, entry);
-            if (!parent)
-                return [];
-            return orderedEntries(parent, settings)
-                .map(sub => visibility.rowByEntry.get(sub))
-                .filter((subRow): subRow is HTMLTableRowElement => subRow !== undefined);
-        },
+        getSiblingRows: () => orderedEntries(parentEntries, settings)
+            .map(sub => visibility.rowByEntry.get(sub))
+            .filter((subRow): subRow is HTMLTableRowElement => subRow !== undefined),
         onDrop: insertBefore => {
             // hidden rows belong to collapsed branches, which the whole
             // sibling level shares: a visible row never has hidden siblings
@@ -847,8 +888,6 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
 
     let entryButtons = row.createEl("td");
     entryButtons.addClass("tempo-table-buttons");
-    const parentList = findParentEntry(tracker.entries, entry);
-    const displayIndex = parentList ? orderedEntries(parentList, settings).indexOf(entry) : 0;
     void new ButtonComponent(entryButtons)
         .setClass("clickable-icon")
         .setClass("tempo-action-move")
@@ -864,7 +903,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
         .setClass("tempo-action-move")
         .setTooltip("Move down")
         .setIcon("chevron-down")
-        .setDisabled(displayIndex < 0 || displayIndex >= (parentList ? parentList.length : 1) - 1)
+        .setDisabled(displayIndex < 0 || displayIndex >= parentEntries.length - 1)
         .onClick(async () => {
             if (moveEntryByOffset(tracker.entries, entry, 1, settings))
                 await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
@@ -874,7 +913,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
         .setClass("tempo-action-play")
         .setIcon(`lucide-${entryRunning ? "square" : "play"}`)
         .setTooltip(entryRunning ? "End" : "Continue")
-        .setDisabled(trackerRunning && !entryRunning)
+        .setDisabled(!!runningEntry && !entryRunning)
         .onClick(async () => {
             if (entryRunning) {
                 endRunningEntry(tracker);
@@ -923,7 +962,7 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
         await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
         void editButton.setIcon("lucide-pencil");
         editButton.buttonEl.removeClass("tempo-action-editing");
-        void renderNameAsMarkdown(app, nameField.label, entry.name, getFile, component);
+        void renderName(app, nameField.label, entry.name, getFile, component);
     }
 
     function startEditing() {
@@ -970,8 +1009,11 @@ function addEditableTableRow(app: App, tracker: Tracker, entry: Entry, table: HT
         });
 
     if (entry.subEntries) {
-        for (let sub of orderedEntries(entry.subEntries, settings))
-            addEditableTableRow(app, tracker, sub, table, newSegmentNameBox, trackerRunning, getFile, getSectionInfo, settings, indent + 1, component, liveCells, scheduleCollapseSave, visibility, ancestorsCollapsed || !!entry.collapsed);
+        // pass each child's sibling list and display position down so no row
+        // ever searches the tree for its own context
+        const ordered = orderedEntries(entry.subEntries, settings);
+        for (let i = 0; i < ordered.length; i++)
+            addEditableTableRow(ctx, ordered[i]!, table, indent + 1, entry.subEntries, i, ancestorsCollapsed || !!entry.collapsed);
     }
 }
 
@@ -982,19 +1024,49 @@ function showConfirm(app: App, message: string): Promise<boolean> {
     });
 }
 
-async function renderNameAsMarkdown(app: App, label: HTMLSpanElement, name: string, getFile: GetFile, component: Component): Promise<void> {
-    // render into a detached container first: MarkdownRenderer resolves
-    // asynchronously when content needs loading (linked images etc.), and the
-    // old approach wrote into the label while unwrapping it synchronously,
-    // racing the renderer. Passing the raw name (not innerHTML) also keeps
-    // literal HTML in task names from being interpreted as markup.
-    const temp = createSpan();
-    await MarkdownRenderer.render(app, name, temp, getFile(), component);
+// characters that can start a markdown/HTML construct in Obsidian. Names with
+// none of these (plus no `www.` autolink and no leading list/quote/heading
+// marker) render to themselves verbatim, so we can skip the renderer entirely
+// for them and just keep the plain text the label already holds.
+const MARKDOWN_OR_HTML = /[\\`*_~[\]!<>#|:$]/;
+const MARKDOWN_LEADING = /^\s*(#{1,6}\s|>|[-+*]\s|\d+[.)]\s)/;
+
+function hasMarkdownSyntax(name: string): boolean {
+    return MARKDOWN_OR_HTML.test(name) || MARKDOWN_LEADING.test(name) || name.includes("www.");
+}
+
+// Rendered segment names, keyed by name, so a table rebuild after every
+// interaction doesn't re-run MarkdownRenderer for names it already rendered
+// this session. Entries are re-cloned on reuse so two rows sharing a name
+// each get their own copy of the nodes.
+const nameRenderCache = new Map<string, Node[]>();
+
+async function renderName(app: App, label: HTMLSpanElement, name: string, getFile: GetFile, component: Component): Promise<void> {
+    if (!hasMarkdownSyntax(name)) {
+        // plain text: the label already holds the raw name (createSpan text),
+        // and MarkdownRenderer would render it back to the same text
+        return;
+    }
+    let nodes = nameRenderCache.get(name);
+    if (!nodes) {
+        // render into a detached container first: MarkdownRenderer resolves
+        // asynchronously when content needs loading (linked images etc.), and
+        // the old approach wrote into the label while unwrapping it
+        // synchronously, racing the renderer. Passing the raw name (not
+        // innerHTML) also keeps literal HTML in task names from being
+        // interpreted as markup.
+        const temp = createSpan();
+        await MarkdownRenderer.render(app, name, temp, getFile(), component);
+        if (!label.isConnected)
+            return; // the table was rebuilt while we were rendering; discard
+        // rendering wraps the content in a paragraph — unwrap it
+        const p = temp.querySelector("p");
+        nodes = p?.hasChildNodes() ? Array.from(p.childNodes) : [];
+        nameRenderCache.set(name, nodes);
+    }
     if (!label.isConnected)
-        return; // the table was rebuilt while we were rendering; discard
-    // rendering wraps the content in a paragraph — unwrap it
-    const p = temp.querySelector("p");
-    label.replaceChildren(...(p?.hasChildNodes() ? Array.from(p.childNodes) : []));
+        return;
+    label.replaceChildren(...nodes.map(n => n.cloneNode(true)));
 }
 
 
