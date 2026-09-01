@@ -237,13 +237,15 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
     }
 
     let liveCells: LiveDurationCell[] = [];
+    // popout-safe: timers live on the window that owns this block
+    const win = element.ownerDocument.defaultView ?? window;
     // collapse toggles rewrite the whole note section just to persist a boolean;
     // debounce bursts of toggles into a single write (still session-surviving)
     let collapseSaveTimer: number | undefined;
     const scheduleCollapseSave = (): void => {
         if (collapseSaveTimer !== undefined)
-            window.clearTimeout(collapseSaveTimer);
-        collapseSaveTimer = window.setTimeout(() => {
+            win.clearTimeout(collapseSaveTimer);
+        collapseSaveTimer = win.setTimeout(() => {
             collapseSaveTimer = undefined;
             void saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
         }, 300);

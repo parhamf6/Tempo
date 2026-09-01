@@ -27,21 +27,35 @@ const DRAG_THRESHOLD = 4;
 export function makeRowDraggable(options: RowDragOptions): void {
     const {handle, row, wrap, isEditing, getSiblingRows, onDrop} = options;
 
+    // popout-safe: never use the global document/window, which point at the
+    // main window when the tracker is rendered in a popped-out pane
+    const doc = row.ownerDocument;
+    const win = doc.defaultView!;
+
     let pressed = false;
     let started = false;
     let startY = 0;
     let indicator: HTMLDivElement | undefined;
     let insertBefore: number | null = null;
+    // rects of every visible sibling (drag row excluded), plus the wrap's
+    // rect, captured once when the drag starts. positionIndicator reuses these
+    // instead of asking the browser for forced layout on every pointer move.
+    let siblingTops: number[] = [];
+    let wrapTop = 0;
+    // the drag row's index among its visible siblings, resolved once at start
+    let rowSlot = 0;
 
     function cleanup(): void {
         pressed = false;
         started = false;
         insertBefore = null;
         row.removeClass("tempo-row-dragging");
-        document.body.removeClass("tempo-dragging");
+        doc.body.removeClass("tempo-dragging");
         indicator?.remove();
         indicator = undefined;
-        window.removeEventListener("keydown", onKeyDown, true);
+        win.removeEventListener("keydown", onKeyDown, true);
+        win.removeEventListener("scroll", onScrollResize, true);
+        win.removeEventListener("resize", onScrollResize);
     }
 
     function onKeyDown(e: KeyboardEvent): void {
@@ -52,30 +66,49 @@ export function makeRowDraggable(options: RowDragOptions): void {
         }
     }
 
+    // rows may move under the pointer if the page scrolls or the window
+    // resizes mid-drag; re-snapshot the cached rects instead of letting them
+    // go stale (the old code re-measured on every pointer move)
+    function onScrollResize(): void {
+        if (started)
+            snapshotRects();
+    }
+
+    // snapshots the visible sibling row rects once; called when a drag starts.
+    // siblingTops holds the top edge of every sibling EXCEPT the dragged row,
+    // plus the bottom edge of the last row (= the append boundary), so the
+    // candidate index i maps directly to "insert before sibling i"
+    function snapshotRects(): void {
+        const all = getSiblingRows().filter(sibling => !sibling.hidden);
+        rowSlot = all.indexOf(row);
+        const others = all.filter(sibling => sibling !== row);
+        const wrapRect = wrap.getBoundingClientRect();
+        wrapTop = wrapRect.top;
+        siblingTops = others.map(sibling => sibling.getBoundingClientRect().top);
+        siblingTops.push(others.length
+            ? others[others.length - 1]!.getBoundingClientRect().bottom
+            : wrapRect.top);
+    }
+
     // chooses the sibling boundary closest to the pointer and moves the
     // insertion line there; boundaries are every row's top edge plus the
     // last row's bottom edge (= append at the end)
     function positionIndicator(pointerY: number): void {
-        const all = getSiblingRows().filter(sibling => !sibling.hidden);
-        const from = all.indexOf(row);
-        if (from < 0) {
+        if (rowSlot < 0) {
             cleanup();
             return;
         }
-        const others = all.filter(sibling => sibling !== row);
-        const wrapRect = wrap.getBoundingClientRect();
-
-        let best = others.length;
-        let bestY = others.length
-            ? others[others.length - 1]!.getBoundingClientRect().bottom
-            : wrapRect.top;
+        const bestY = siblingTops[siblingTops.length - 1]!;
+        let best = siblingTops.length - 1;
         let bestDist = Math.abs(pointerY - bestY);
-        for (let i = 0; i < others.length; i++) {
-            const top = others[i]!.getBoundingClientRect().top;
-            const dist = Math.abs(pointerY - top);
+        let bestPos = bestY;
+        // the row's own slot is excluded: siblingTops holds one entry per
+        // OTHER row, so index maps to boundary candidates directly
+        for (let i = 0; i < siblingTops.length - 1; i++) {
+            const dist = Math.abs(pointerY - siblingTops[i]!);
             if (dist < bestDist) {
                 best = i;
-                bestY = top;
+                bestPos = siblingTops[i]!;
                 bestDist = dist;
             }
         }
@@ -84,13 +117,13 @@ export function makeRowDraggable(options: RowDragOptions): void {
         // the gap below it (top edge of the row that followed it) is the
         // boundary it already occupies. The gap above it has no boundary of
         // its own — the line above the row above it means "move up one".
-        const noop = best === from;
+        const noop = best === rowSlot;
         insertBefore = noop ? null : best;
         if (!indicator)
             return;
         indicator.hidden = noop;
         if (!noop)
-            indicator.style.top = `${bestY - wrapRect.top}px`;
+            indicator.style.top = `${bestPos - wrapTop}px`;
     }
 
     handle.addEventListener("pointerdown", (e: PointerEvent) => {
@@ -115,11 +148,14 @@ export function makeRowDraggable(options: RowDragOptions): void {
             }
             started = true;
             row.addClass("tempo-row-dragging");
-            document.body.addClass("tempo-dragging");
+            doc.body.addClass("tempo-dragging");
             indicator = createDiv({cls: "tempo-drop-indicator"});
             indicator.hidden = true;
             wrap.appendChild(indicator);
-            window.addEventListener("keydown", onKeyDown, true);
+            win.addEventListener("keydown", onKeyDown, true);
+            win.addEventListener("scroll", onScrollResize, true);
+            win.addEventListener("resize", onScrollResize);
+            snapshotRects();
         }
         if (!row.isConnected) {
             cleanup();
