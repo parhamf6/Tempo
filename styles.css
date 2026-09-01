@@ -196,12 +196,6 @@
 
 .tempo-timer-current .tempo-timer-icon {
     color: var(--interactive-accent);
-    animation: tempo-pulse 1.8s ease-in-out infinite;
-}
-
-@keyframes tempo-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
 }
 
 /* ---------- Table ---------- */
@@ -1263,7 +1257,6 @@ details.tempo-breakdown[open] .tempo-breakdown-body {
    file) out-specify every transition/animation rule above, so no
    !important is needed to disable motion. */
 @media (prefers-reduced-motion: reduce) {
-    .tempo-timer-current .tempo-timer-icon,
     .tempo-stats-day-panel.is-entering,
     .tempo-stats-day-panel.is-closing,
     details.tempo-breakdown[open] .tempo-breakdown-body,
