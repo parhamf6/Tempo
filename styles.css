@@ -28,6 +28,7 @@
 
 /* ---------- Top control bar: play button + segment name, one unified pill ---------- */
 .tempo-controls {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -97,6 +98,41 @@
 
 .tempo-txt:disabled {
     opacity: 0.55;
+}
+
+/* ---------- Segment name suggestions (autocomplete dropdown) ---------- */
+.tempo-suggest {
+    position: absolute;
+    display: none;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 100;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m, 10px);
+    box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.15));
+    padding: 4px;
+}
+
+.tempo-suggest.is-visible {
+    display: block;
+}
+
+.tempo-suggest-item {
+    padding: 7px 10px;
+    border-radius: var(--radius-s, 5px);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tempo-suggest-item:hover,
+.tempo-suggest-item.is-selected {
+    background: var(--background-modifier-hover);
 }
 
 /* reset tracker: quiet icon at the right end of the controls pill, tints

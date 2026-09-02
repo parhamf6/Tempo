@@ -4,6 +4,7 @@ export const defaultSettings: TempoSettings = {
     csvDelimiter: ",",
     segmentNameTemplate: "Segment #",
     subEntryNameTemplate: "Part #",
+    suggestedSegmentNames: "",
     fineGrainedDurations: true,
     reverseSegmentOrder: false,
     timestampDurations: false,
@@ -20,6 +21,7 @@ export interface TempoSettings {
     // counter, zero-padded to the run's length ("PART ###" → "PART 004")
     segmentNameTemplate: string;
     subEntryNameTemplate: string;
+    suggestedSegmentNames: string;
     fineGrainedDurations: boolean;
     reverseSegmentOrder: boolean;
     timestampDurations: boolean;

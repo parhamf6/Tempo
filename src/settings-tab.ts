@@ -71,6 +71,16 @@ export class TempoSettingsTab extends PluginSettingTab {
                 }
             },
             {
+                name: "Suggested segment names",
+                desc: "One name per line. These are offered as suggestions in the segment name box when it is focused, filtered as you type.",
+                control: {
+                    key: "suggestedSegmentNames",
+                    type: "textarea",
+                    rows: 5,
+                    placeholder: "Meeting\nCoding\nDeep work\nReview\nLunch"
+                }
+            },
+            {
                 name: "Fine-grained durations",
                 desc: "Whether durations should include days, months and years. If this is disabled, additional time units will be displayed as part of the hours.",
                 control: {

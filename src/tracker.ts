@@ -4,6 +4,7 @@ import {TempoSettings} from "./settings";
 import {ConfirmModal} from "./confirm-modal";
 import {makeRowDraggable} from "./drag";
 import {buildJson, buildToml, buildYaml, registerExportFormat, showExportMenu} from "./export";
+import {attachNameSuggestions} from "./autocomplete";
 
 export interface Tracker {
     entries: Entry[];
@@ -181,6 +182,9 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
         .setPlaceholder("Segment name")
         .setDisabled(running);
     newSegmentNameBox.inputEl.addClass("tempo-txt");
+    attachNameSuggestions(newSegmentNameBox, {
+        getSuggestions: () => settings.suggestedSegmentNames.split("\n")
+    });
     newSegmentNameBox.inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
         if (e.key === "Enter" && !running) {
             e.preventDefault();
