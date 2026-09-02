@@ -135,6 +135,118 @@
     background: var(--background-modifier-hover);
 }
 
+/* status-bar scope editor embedded in a settings row */
+.tempo-status-sources {
+    width: 100%;
+}
+
+/* ---------- Status bar running timers ---------- */
+.tempo-status {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.tempo-status-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    user-select: none;
+}
+
+.tempo-status-tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    display: none;
+    white-space: nowrap;
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 4px 9px;
+    border-radius: 6px;
+    font-size: var(--font-ui-small);
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+    border: 1px solid var(--background-modifier-border);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    pointer-events: none;
+}
+
+.tempo-status-item:hover .tempo-status-tooltip {
+    display: block;
+}
+
+.tempo-status-icon {
+    display: flex;
+    flex: 0 0 auto;
+    padding: 1px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+.tempo-status-icon:hover {
+    color: var(--color-red, var(--text-error));
+}
+
+.tempo-status-icon svg {
+    width: 11px;
+    height: 11px;
+}
+
+.tempo-status-body {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 130px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.tempo-status-body:hover {
+    background: var(--background-modifier-hover);
+}
+
+.tempo-status-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: var(--font-ui-smaller);
+    color: var(--text-normal);
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.tempo-status-dur {
+    font-variant-numeric: tabular-nums;
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    flex: 0 0 auto;
+}
+
+/* mobile: collapsed counter */
+.tempo-status-mobile {
+    gap: 3px;
+    padding: 1px 5px;
+    color: var(--color-green, var(--interactive-accent));
+    max-width: none;
+}
+
+.tempo-status-mobile .tempo-status-icon {
+    color: var(--color-green, var(--interactive-accent));
+}
+
+.tempo-status-count {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+}
+
 /* reset tracker: quiet icon at the right end of the controls pill, tints
    red on hover since both reset actions are destructive */
 .tempo-btn-reset.clickable-icon {

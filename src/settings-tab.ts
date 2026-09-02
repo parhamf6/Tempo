@@ -1,6 +1,7 @@
 import {App, PluginSettingTab, Setting, SettingGroup, type SettingDefinitionItem} from "obsidian";
 import TempoPlugin from "./main";
 import {defaultSettings, type TempoSettings} from "./settings";
+import {renderSources} from "./stats/render";
 
 type TempoSettingKey = keyof TempoSettings;
 
@@ -135,6 +136,27 @@ export class TempoSettingsTab extends PluginSettingTab {
                 }
             },
             {
+                name: "Show running timers in the status bar",
+                desc: "Displays every currently running timer in Obsidian's bottom status bar, where you can open the note or stop the timer.",
+                control: {
+                    key: "statusBarEnabled",
+                    type: "toggle",
+                    defaultValue: defaultSettings.statusBarEnabled
+                }
+            },
+            {
+                name: "Status bar scope",
+                desc: "Which notes to watch for running timers. Leave empty to watch the whole vault, or add specific folders and files, like the stats block.",
+                render: (setting: Setting) => {
+                    setting.controlEl.empty();
+                    const host = setting.controlEl.createDiv({cls: "tempo-status-sources"});
+                    renderSources(host, {sources: this.plugin.settings.statusBarSources, range: {type: "today"}}, async () => {
+                        await this.plugin.saveSettings();
+                        this.plugin.onSettingsChanged();
+                    });
+                }
+            },
+            {
                 name: "Support the plugin",
                 desc: "Report issues or contribute on GitHub.",
                 render: (setting: Setting, _group: SettingGroup) => {
@@ -163,5 +185,6 @@ export class TempoSettingsTab extends PluginSettingTab {
             settings[key] = value;
         }
         await this.plugin.saveSettings();
+        this.plugin.onSettingsChanged();
     }
 }

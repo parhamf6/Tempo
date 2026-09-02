@@ -213,7 +213,7 @@ function describeSource(source: StatsSource): string {
     return `All files (${scope})`;
 }
 
-function renderSources(container: HTMLElement, state: StatsState, onChange: () => Promise<void>): void {
+export function renderSources(container: HTMLElement, state: StatsState, onChange: () => Promise<void>): void {
     container.empty();
     container.createDiv({text: "Sources", cls: "tempo-stats-heading"});
 

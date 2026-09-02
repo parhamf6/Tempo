@@ -5,6 +5,7 @@ import {displayTracker, Entry, formatDuration, formatTimestamp, getDuration, get
 import {displayStats} from "./stats/render";
 import {loadStatsState} from "./stats/state";
 import {defaultStatsState} from "./stats/types";
+import {RunningTimersStatusBar} from "./status";
 
 export default class TempoPlugin extends Plugin {
 
@@ -20,11 +21,18 @@ export default class TempoPlugin extends Plugin {
         orderedEntries: (entries: Entry[]) => orderedEntries(entries, this.settings)
     };
     public settings!: TempoSettings;
+    public onSettingsChanged: () => void = () => {};
 
     async onload(): Promise<void> {
         await this.loadSettings();
 
         this.addSettingTab(new TempoSettingsTab(this.app, this));
+
+        const statusBarEl = this.addStatusBarItem();
+        statusBarEl.addClass("tempo-status");
+        const statusBar = new RunningTimersStatusBar(this.app, statusBarEl, () => this.settings);
+        this.addChild(statusBar);
+        this.onSettingsChanged = () => statusBar.settingsChanged();
 
         this.registerMarkdownCodeBlockProcessor("tempo", (s, e, i) => {
             e.empty();

@@ -1,3 +1,5 @@
+import {StatsSource} from "./stats/types";
+
 export const defaultSettings: TempoSettings = {
     timestampFormat: "YY-MM-DD HH:mm:ss",
     editableTimestampFormat: "YYYY-MM-DD HH:mm:ss",
@@ -5,6 +7,8 @@ export const defaultSettings: TempoSettings = {
     segmentNameTemplate: "Segment #",
     subEntryNameTemplate: "Part #",
     suggestedSegmentNames: "",
+    statusBarEnabled: false,
+    statusBarSources: [],
     fineGrainedDurations: true,
     reverseSegmentOrder: false,
     timestampDurations: false,
@@ -22,6 +26,9 @@ export interface TempoSettings {
     segmentNameTemplate: string;
     subEntryNameTemplate: string;
     suggestedSegmentNames: string;
+    // status bar running-timer indicators; empty sources = whole vault
+    statusBarEnabled: boolean;
+    statusBarSources: StatsSource[];
     fineGrainedDurations: boolean;
     reverseSegmentOrder: boolean;
     timestampDurations: boolean;
