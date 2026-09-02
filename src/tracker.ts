@@ -3,6 +3,7 @@ import {moment} from "./moment";
 import {TempoSettings} from "./settings";
 import {ConfirmModal} from "./confirm-modal";
 import {makeRowDraggable} from "./drag";
+import {buildJson, buildToml, buildYaml, registerExportFormat, showExportMenu} from "./export";
 
 export interface Tracker {
     entries: Entry[];
@@ -15,6 +16,12 @@ export interface Entry {
     subEntries?: Entry[];
     collapsed?: boolean;
 }
+
+registerExportFormat({id: "table", label: "Table", icon: "table", build: createMarkdownTable});
+registerExportFormat({id: "csv", label: "CSV", icon: "file-spreadsheet", build: createCsv});
+registerExportFormat({id: "json", label: "JSON", icon: "file-json", build: buildJson});
+registerExportFormat({id: "toml", label: "TOML", icon: "file-code", build: buildToml});
+registerExportFormat({id: "yaml", label: "YAML", icon: "file-code-2", build: buildYaml});
 
 // Persists one ```tempo / ```tempo-stats code block section back into its note.
 // Uses vault.process(), which serializes writes under Obsidian's lock, so two
@@ -291,16 +298,12 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
         for (let i = 0; i < ordered.length; i++)
             addEditableTableRow(rowCtx, ordered[i]!, table, 0, tracker.entries, i, false);
 
-        // add copy buttons
+        // add export button (format menu populated by registerExportFormat)
         let buttons = element.createDiv({ cls: "tempo-bottom" });
-        let copyTableBtn = new ButtonComponent(buttons)
-            .onClick(() => navigator.clipboard.writeText(createMarkdownTable(tracker, settings)));
-        setIcon(copyTableBtn.buttonEl.createSpan({ cls: "tempo-btn-icon" }), "table");
-        copyTableBtn.buttonEl.createSpan({ text: "Copy as table" });
-        let copyCsvBtn = new ButtonComponent(buttons)
-            .onClick(() => navigator.clipboard.writeText(createCsv(tracker, settings)));
-        setIcon(copyCsvBtn.buttonEl.createSpan({ cls: "tempo-btn-icon" }), "file-spreadsheet");
-        copyCsvBtn.buttonEl.createSpan({ text: "Copy as CSV" });
+        let exportBtn = new ButtonComponent(buttons)
+            .onClick(evt => showExportMenu(evt, tracker, settings));
+        setIcon(exportBtn.buttonEl.createSpan({ cls: "tempo-btn-icon" }), "download");
+        exportBtn.buttonEl.createSpan({ text: "Export" });
     }
 
 
