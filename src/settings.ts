@@ -1,4 +1,5 @@
 import {StatsSource} from "./stats/types";
+import {Category} from "./meta";
 
 export const defaultSettings: TempoSettings = {
     timestampFormat: "YY-MM-DD HH:mm:ss",
@@ -7,6 +8,8 @@ export const defaultSettings: TempoSettings = {
     segmentNameTemplate: "Segment #",
     subEntryNameTemplate: "Part #",
     suggestedSegmentNames: "",
+    categories: [],
+    suggestedTags: "",
     statusBarEnabled: false,
     statusBarSources: [],
     fineGrainedDurations: true,
@@ -26,6 +29,12 @@ export interface TempoSettings {
     segmentNameTemplate: string;
     subEntryNameTemplate: string;
     suggestedSegmentNames: string;
+    // single-select categories (name + optional color) offered across every
+    // tracker; referenced by entries via their plain name
+    categories: Category[];
+    // one tag per line, offered in tag autocomplete alongside tags already
+    // used in the current tracker
+    suggestedTags: string;
     // status bar running-timer indicators; empty sources = whole vault
     statusBarEnabled: boolean;
     statusBarSources: StatsSource[];

@@ -30,6 +30,13 @@ https://github.com/user-attachments/assets/33966c3e-238d-4aa4-9967-61d2681e93fa
   running timer survives note switches, app restarts, and reboots.
 - **Multiple segments** — track as many named segments as you like; play,
   continue, rename, and delete them inline.
+- **Rich segment metadata** — give any segment or child segment a **category**
+  (single-select, from a global list you manage), any number of **tags**, a
+  **color**, and a **note**. Colors follow your theme; children inherit their
+  parent's category/color (and union its tags) unless they set their own.
+- **Details editor & quick actions** — click a row's tags icon (or right-click
+  the row) to edit a segment's metadata in a dialog; set category/color from a
+  right-click menu without opening it.
 - **Copy as CSV** — export the table to your clipboard for spreadsheets.
 - **Totals & today** — see the total tracked time and (optionally) the time
   tracked today.
@@ -40,6 +47,10 @@ https://github.com/user-attachments/assets/33966c3e-238d-4aa4-9967-61d2681e93fa
     you tell it to; it does _not_ scan your whole vault automatically.
   - **Time range** — **Today**, **7 days**, **30 days**, or a **custom range**
     picked with a calendar date picker.
+  - **Group by** — break the numbers down **by name**, **by category**, or **by
+    tag** (persisted per stats block); **filter chips** narrow the view to the
+    categories/tags you pick (session-only, so a reload always shows the full
+    range).
   - The panel shows, for the selected period: the **total time** tracked, the
     **number of tasks (segments)** tracked, and the **number of files** scanned.
     It also draws a daily **bar chart** and a per-task **leaderboard** as a
@@ -113,6 +124,26 @@ Then copy the three built files into your vault:
    and **delete** (🗑️) controls to manage them. Use **Copy as CSV** to export
    the table.
 
+### Categorizing, tagging & notes
+
+- **Categories** are single-select groups (optionally colored) you manage in
+  **Settings → Tempo → Categories**. Pick one next to the segment name box
+  before pressing play, or after the segment exists.
+- Every row that has metadata shows it quietly beneath the name: a colored
+  category chip and up to three `#tag` chips (dashed chips are inherited from
+  an ancestor). The row itself gets a colored left rail and a dot before its
+  name; the running timer and status bar reuse the same color.
+- Click a row's **tags icon** (or right-click the row → **Edit details**) to
+  open the segment dialog: rename it, choose a category, add tags (with
+  autocomplete from your suggested tags and the tags already used in the
+  tracker), pick a color override, and write a markdown note with a live
+  preview. The note icon in the row shows a rendered preview on hover.
+- Right-click a row for quick actions: **Set color**, **Set category**, and
+  **Clear color**.
+- Exports carry the metadata: the markdown table shows `name (category)
+  #tags` inline, CSV gains Category/Tags/Note columns, and JSON/TOML/YAML
+  include all fields.
+
 The tracker data lives as JSON inside the code block, so it stays in your note
 and syncs with the rest of your vault.
 
@@ -126,6 +157,9 @@ and syncs with the rest of your vault.
      **single file**. Only the sources you add are scanned.
    - **Pick a time range** — **Today**, **7 days**, **30 days**, or a
      **custom range** with a calendar date picker.
+   - **Group by name / category / tag** to change how the leaderboard and
+     breakdown are aggregated, and click the **category/tag filter chips** to
+     narrow the view.
    - The panel reports, for that period: the **total time** tracked, the
      **number of tasks (segments)** tracked, and the **number of files** scanned.
      It also draws a daily **bar chart** and a per-task **leaderboard**.
@@ -147,6 +181,8 @@ Open **Settings → Tempo** (or search "Tempo" in Obsidian's settings search).
 | **Display segments in reverse order** | Show older segments at the bottom instead of the top. |
 | **Show total today** | Display the total time spent today in the tracker table. |
 | **Use monospaced font for times** | Use your monospaced font for the title timer so digits don't shift while counting. |
+| **Categories** | Manage the global single-select categories (name + optional color) that segments and stats can group by. |
+| **Suggested tags** | One tag per line (no `#`), offered in tag autocomplete along with tags already used in a tracker. |
 | **Pretty-print tracker data** | Pretty-print the code block JSON (larger files, easier sync merges). |
 
 ---
@@ -202,8 +238,12 @@ A time tracker is just a special code block that stores the timestamps of when
 you pressed the **play** and **stop** buttons. Because only timestamps are
 stored, you can switch notes, close Obsidian, or shut down your machine while a
 tracker is running — when you return, it's still running. The segment names,
-start times, and end times are saved as JSON in the code block and rendered as a
-table in preview/reading mode.
+start times, end times, and any metadata (category/tags/color/note) are saved as
+JSON in the code block and rendered as a table in preview/reading mode. All
+metadata fields are optional, so trackers written by older Tempo versions load
+unchanged. One caveat: if an *older* Tempo version on another device edits and
+re-saves a tracker, it only keeps the fields it knows about and will drop the
+metadata — keep every device on the same version to be safe.
 
 ---
 

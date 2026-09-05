@@ -12,11 +12,12 @@ import {
 import {moment} from "../moment";
 import {TempoSettings} from "../settings";
 import {formatDuration} from "../tracker";
+import {colorVar} from "../meta";
 import {invalidateStatsCache, scanEntries} from "./scan";
-import {computeStats, computeStatsForPeriod, resolveRange} from "./aggregate";
+import {computeStats, computeStatsForPeriod, resolveRange, StatsViewConfig} from "./aggregate";
 import {saveStatsState} from "./state";
 import {buildStatsCsv} from "./export";
-import {StatsBucket, StatsLeaderboardRow, StatsRange, StatsRangeType, StatsResult, StatsSource, StatsState} from "./types";
+import {StatsBucket, StatsGroupBy, StatsLeaderboardRow, StatsRange, StatsRangeType, StatsResult, StatsSource, StatsState} from "./types";
 
 type GetFile = () => string;
 
@@ -47,6 +48,8 @@ export function displayStats(
 
     const sourcesSection = element.createDiv({cls: "tempo-stats-sources"});
     const rangeSection = element.createDiv({cls: "tempo-stats-range"});
+    const groupBySection = element.createDiv({cls: "tempo-stats-groupby"});
+    const facetsSection = element.createDiv({cls: "tempo-stats-facets"});
     const resultsSection = element.createDiv({cls: "tempo-stats-results"});
     const bottom = element.createDiv({cls: "tempo-bottom"});
 
@@ -69,6 +72,27 @@ export function displayStats(
     let panelEnterPending = false;
     let closingTimer: number | undefined;
 
+    // "Group by" persists in the block state; category/tag filter chips are
+    // session-only so a reload never silently shows a filtered view.
+    const groupBy = (): StatsGroupBy =>
+        state.groupBy === "category" || state.groupBy === "tag" ? state.groupBy : "name";
+    const activeFilters = {categories: [] as string[], tags: [] as string[]};
+    const viewConfig = (): StatsViewConfig => ({
+        groupBy: groupBy(),
+        categories: settings.categories,
+        filters: {categories: activeFilters.categories, tags: activeFilters.tags}
+    });
+    const groupByPills: HTMLElement[] = [];
+
+    const setGroupBy = async (value: StatsGroupBy): Promise<void> => {
+        if (value === groupBy())
+            return;
+        state.groupBy = value;
+        const idx = groupByOptions.findIndex(o => o.type === value);
+        groupByPills.forEach((el, i) => el.toggleClass("is-active", i === idx));
+        await onChange();
+    };
+
     const refresh = async (): Promise<void> => {
         if (refreshing)
             return;
@@ -76,7 +100,7 @@ export function displayStats(
         refreshButton?.setDisabled(true);
         try {
             const scanned = await scanEntries(app, state.sources);
-            const result = computeStats(scanned.entries, {...state.range, offset: rangeOffset || undefined}, scanned.fileCount);
+            const result = computeStats(scanned.entries, {...state.range, offset: rangeOffset || undefined}, scanned.fileCount, viewConfig());
 
             // drop the selection if it no longer matches a bucket (e.g. range changed)
             if (selectedKey !== null && !result.buckets.some(b => b.start === selectedKey)) {
@@ -87,16 +111,18 @@ export function displayStats(
                 ? result.buckets.find(b => b.start === selectedKey) ?? null
                 : null;
             const filteredResult = selected && filterActive
-                ? computeStatsForPeriod(scanned.entries, selected.start, selected.end, scanned.fileCount)
+                ? computeStatsForPeriod(scanned.entries, selected.start, selected.end, scanned.fileCount, viewConfig())
                 : null;
 
             // remember ephemeral view state so background refreshes don't disturb the reader
             const uiState = captureStatsUiState(resultsSection);
+            renderFacetChips(facetsSection, result, settings, activeFilters, () => void refresh());
             renderResults(resultsSection, result, settings, {
                 selected,
                 filteredResult,
                 openTaskKey,
                 panelEntering: panelEnterPending,
+                groupBy: groupBy(),
                 onSelect: (bucket) => {
                     const shouldClose = !bucket || bucket.start === selectedKey;
                     if (shouldClose) {
@@ -146,6 +172,7 @@ export function displayStats(
             rangeOffset = offset;
         }
     });
+    renderGroupBy(groupBySection, groupByPills, groupBy(), value => void setGroupBy(value));
 
     refreshButton = new ButtonComponent(bottom).onClick(async () => await refresh());
     setIcon(refreshButton.buttonEl.createSpan({cls: "tempo-btn-icon"}), "refresh-cw");
@@ -153,8 +180,8 @@ export function displayStats(
 
     const exportButton = new ButtonComponent(bottom).onClick(async () => {
         const scanned = await scanEntries(app, state.sources);
-        const result = computeStats(scanned.entries, state.range, scanned.fileCount);
-        await navigator.clipboard.writeText(buildStatsCsv(result, settings));
+        const result = computeStats(scanned.entries, state.range, scanned.fileCount, viewConfig());
+        await navigator.clipboard.writeText(buildStatsCsv(result, settings, groupBy()));
     });
     setIcon(exportButton.buttonEl.createSpan({cls: "tempo-btn-icon"}), "clipboard-copy");
     exportButton.buttonEl.createSpan({text: "Copy stats as CSV"});
@@ -580,6 +607,98 @@ function renderRange(
 }
 
 // ---------------------------------------------------------------------------
+// Group-by selector + category/tag filter chips
+// ---------------------------------------------------------------------------
+
+interface GroupByOption {
+    type: StatsGroupBy;
+    label: string;
+}
+
+const groupByOptions: GroupByOption[] = [
+    {type: "name", label: "By name"},
+    {type: "category", label: "By category"},
+    {type: "tag", label: "By tag"}
+];
+
+function renderGroupBy(
+    container: HTMLElement,
+    pills: HTMLElement[],
+    current: StatsGroupBy,
+    onSet: (value: StatsGroupBy) => void
+): void {
+    container.empty();
+    container.createSpan({text: "Group by", cls: "tempo-stats-groupby-label"});
+    pills.length = 0;
+    for (const option of groupByOptions) {
+        const btn = new ButtonComponent(container)
+            .setButtonText(option.label)
+            .onClick(() => onSet(option.type));
+        btn.buttonEl.addClass("tempo-stats-range-pill");
+        btn.buttonEl.toggleClass("is-active", option.type === current);
+        pills.push(btn.buttonEl);
+    }
+}
+
+// Category/tag chips derived from the facets present in the current range.
+// Clicking toggles membership in the session-only filter set (union within a
+// dimension, AND across dimensions); "Clear" resets both.
+function renderFacetChips(
+    container: HTMLElement,
+    result: StatsResult,
+    settings: TempoSettings,
+    filters: {categories: string[], tags: string[]},
+    onRefresh: () => void
+): void {
+    container.empty();
+    const facets = result.facets;
+    if (facets.categories.length === 0 && facets.tags.length === 0)
+        return;
+
+    const anyActive = filters.categories.length > 0 || filters.tags.length > 0;
+
+    const toggle = (kind: "categories" | "tags", value: string): void => {
+        const list = filters[kind];
+        const key = value.toLocaleLowerCase();
+        const idx = list.findIndex(v => v.toLocaleLowerCase() === key);
+        if (idx >= 0)
+            list.splice(idx, 1);
+        else
+            list.push(value);
+        onRefresh();
+    };
+
+    for (const category of facets.categories) {
+        const chip = container.createEl("button", {cls: "tempo-facet-chip", attr: {type: "button", title: "Filter by category"}});
+        const dot = chip.createSpan({cls: "tempo-chip-dot"});
+        const def = settings.categories.find(c => c.name === category);
+        if (def?.color)
+            dot.style.background = colorVar(def.color)!;
+        chip.createSpan({cls: "tempo-facet-chip-label", text: category});
+        const active = filters.categories.some(v => v.toLocaleLowerCase() === category.toLocaleLowerCase());
+        chip.toggleClass("is-active", active);
+        chip.addEventListener("click", () => toggle("categories", category));
+    }
+    for (const tag of facets.tags) {
+        const chip = container.createEl("button", {cls: "tempo-facet-chip", attr: {type: "button", title: "Filter by tag"}});
+        chip.createSpan({cls: "tempo-facet-chip-label", text: `#${tag}`});
+        const active = filters.tags.some(v => v.toLocaleLowerCase() === tag.toLocaleLowerCase());
+        chip.toggleClass("is-active", active);
+        chip.addEventListener("click", () => toggle("tags", tag));
+    }
+    if (anyActive) {
+        const clear = new ButtonComponent(container)
+            .setButtonText("Clear filters")
+            .onClick(async () => {
+                filters.categories.splice(0);
+                filters.tags.splice(0);
+                onRefresh();
+            });
+        clear.buttonEl.addClass("tempo-facet-clear");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Results: summary cards + chart + leaderboard
 // ---------------------------------------------------------------------------
 
@@ -593,6 +712,8 @@ interface StatsDayView {
     onSelect: (bucket: StatsBucket | null) => void;
     onToggleFilter: () => void;
     onToggleTask: (key: string | null) => void;
+    // how rows are grouped, passed through so the donut can adapt
+    groupBy?: StatsGroupBy;
 }
 
 // ephemeral view state that should survive a background re-render
@@ -746,12 +867,17 @@ function renderResults(container: HTMLElement, result: StatsResult, settings: Te
         });
     }
 
-    renderTaskBreakdown(container, effective, settings);
+    renderTaskBreakdown(container, effective, settings, view.groupBy);
 }
 
 function addLeaderboardRow(board: HTMLElement, row: StatsLeaderboardRow, max: number, settings: TempoSettings): HTMLDivElement {
     const rowEl = board.createDiv({cls: "tempo-stats-lb-row"});
-    rowEl.createDiv({cls: "tempo-stats-lb-name", text: row.name});
+    const nameEl = rowEl.createDiv({cls: "tempo-stats-lb-name"});
+    if (row.color) {
+        const dot = nameEl.createSpan({cls: "tempo-lb-dot"});
+        dot.style.background = colorVar(row.color)!;
+    }
+    nameEl.createSpan({text: row.name});
     const track = rowEl.createDiv({cls: "tempo-stats-lb-track"});
     const bar = track.createDiv({cls: "tempo-stats-lb-bar"});
     bar.style.width = `${Math.max(4, (row.durationMs / max) * 100)}%`;
@@ -785,8 +911,12 @@ function fillTaskDetail(container: HTMLElement, row: StatsLeaderboardRow, bucket
     }
 }
 
-function renderTaskBreakdown(container: HTMLElement, result: StatsResult, settings: TempoSettings): void {
+function renderTaskBreakdown(container: HTMLElement, result: StatsResult, settings: TempoSettings, groupBy?: StatsGroupBy): void {
     if (result.leaderboard.length === 0 || result.totalMs <= 0)
+        return;
+    // tags are a lens, not a partition: rows overlap, so a proportional
+    // donut/percentage split would be meaningless. Name/category are clean.
+    if (groupBy === "tag")
         return;
 
     const details = container.createEl("details", {cls: "tempo-breakdown"});
@@ -802,12 +932,16 @@ function renderTaskBreakdown(container: HTMLElement, result: StatsResult, settin
         "var(--color-cyan)", "var(--color-pink)"
     ];
     const otherColor = "var(--text-faint)";
+    // category/tag rows carry a resolved color from the data; name rows fall
+    // back to the rank palette
+    const colorOf = (r: {color?: string}, i: number): string =>
+        (r.color && colorVar(r.color)) ?? (i < maxSlices ? palette[i % palette.length]! : otherColor);
     const slices = result.leaderboard.slice(0, maxSlices)
-        .map(r => ({name: r.name, durationMs: r.durationMs}));
+        .map(r => ({name: r.name, durationMs: r.durationMs, color: r.color}));
     const rest = result.leaderboard.slice(maxSlices);
     const restMs = rest.reduce((sum, r) => sum + r.durationMs, 0);
     if (restMs > 0)
-        slices.push({name: "Other", durationMs: restMs});
+        slices.push({name: "Other", durationMs: restMs, color: undefined});
 
     const body = details.createDiv({cls: "tempo-breakdown-body"});
     const chartWrap = body.createDiv({cls: "tempo-breakdown-chart"});
@@ -830,7 +964,7 @@ function renderTaskBreakdown(container: HTMLElement, result: StatsResult, settin
     let acc = 0;
     slices.forEach((slice, i) => {
         const frac = slice.durationMs / result.totalMs;
-        const color = i < maxSlices ? palette[i % palette.length]! : otherColor;
+        const color = colorOf(slice, i);
         // capture this slice's accumulated offset NOW — event closures below
         // must not read `acc` after the loop has finished incrementing it
         const sliceStart = acc;
@@ -891,7 +1025,7 @@ function renderTaskBreakdown(container: HTMLElement, result: StatsResult, settin
     slices.forEach((slice, i) => {
         const row = legend.createDiv({cls: "tempo-breakdown-row"});
         const dot = row.createSpan({cls: "tempo-breakdown-dot"});
-        dot.style.background = i < maxSlices ? palette[i % palette.length]! : otherColor;
+        dot.style.background = colorOf(slice, i);
         row.createSpan({cls: "tempo-breakdown-name", text: slice.name});
         row.createSpan({
             cls: "tempo-breakdown-pct",

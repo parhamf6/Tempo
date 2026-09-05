@@ -34,13 +34,20 @@ export interface StatsRange {
 export interface StatsState {
     sources: StatsSource[];
     range: StatsRange;
+    // how the leaderboard and charts group tracked time: by top-level segment
+    // name (classic), category, or tag. Persisted per stats block.
+    groupBy?: StatsGroupBy;
 }
+
+// What the leaderboard/breakdown rows are aggregated over.
+export type StatsGroupBy = "name" | "category" | "tag";
 
 export const defaultStatsRange: StatsRange = { type: "days", days: 7 };
 
 export const defaultStatsState: StatsState = {
     sources: [],
-    range: defaultStatsRange
+    range: defaultStatsRange,
+    groupBy: "name"
 };
 
 // One bucket in the daily/weekly/monthly bar chart.
@@ -55,10 +62,21 @@ export interface StatsBucket {
     leaderboard: StatsLeaderboardRow[];
 }
 
-// One row in the "by name" leaderboard.
+// One row in the "by name" (or by category / by tag) leaderboard.
 export interface StatsLeaderboardRow {
     name: string;
     durationMs: number;
+    // Resolved color token (bare "--color-*"), set for category and tag rows
+    // so the donut and leaderboard can color slices/rows from the data itself.
+    color?: string;
+}
+
+// The categories and tags present in the scanned range, offered as filter
+// chips. Computed without filters applied so chips always reflect the whole
+// window.
+export interface StatsFacets {
+    categories: string[];
+    tags: string[];
 }
 
 export interface StatsResult {
@@ -66,4 +84,5 @@ export interface StatsResult {
     fileCount: number;
     buckets: StatsBucket[];
     leaderboard: StatsLeaderboardRow[];
+    facets: StatsFacets;
 }

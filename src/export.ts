@@ -23,14 +23,22 @@ export function getExportFormats(): ExportFormat[] {
 }
 
 // JSON/TOML/YAML carry the raw tracker data, so drop the UI-only `collapsed`
-// flag before serializing: name/startTime/endTime/subEntries round-trip back
-// into a tracker unchanged.
+// flag before serializing: the metadata fields (tags/category/color/note) are
+// data and round-trip back into a tracker unchanged.
 function strippedEntry(entry: Entry): object {
     const ret: Record<string, unknown> = {name: entry.name};
     if (entry.startTime !== undefined)
         ret.startTime = entry.startTime;
     if (entry.endTime !== undefined)
         ret.endTime = entry.endTime;
+    if (entry.tags !== undefined)
+        ret.tags = entry.tags;
+    if (entry.category !== undefined)
+        ret.category = entry.category;
+    if (entry.color !== undefined)
+        ret.color = entry.color;
+    if (entry.note !== undefined)
+        ret.note = entry.note;
     if (entry.subEntries !== undefined)
         ret.subEntries = entry.subEntries.map(strippedEntry);
     return ret;
@@ -73,6 +81,14 @@ function tomlEntryLines(entry: Entry, path: string): string[] {
         lines.push(`startTime = ${tomlString(entry.startTime)}`);
     if (entry.endTime !== undefined)
         lines.push(`endTime = ${tomlString(entry.endTime)}`);
+    if (entry.tags !== undefined)
+        lines.push(`tags = [${entry.tags.map(t => tomlString(t)).join(", ")}]`);
+    if (entry.category !== undefined)
+        lines.push(`category = ${tomlString(entry.category)}`);
+    if (entry.color !== undefined)
+        lines.push(`color = ${tomlString(entry.color)}`);
+    if (entry.note !== undefined)
+        lines.push(`note = ${tomlString(entry.note)}`);
     for (const sub of entry.subEntries ?? [])
         lines.push("", ...tomlEntryLines(sub, `${path}.subEntries`));
     return lines;
@@ -103,6 +119,17 @@ function yamlEntryLines(entries: Entry[], indent: string): string[] {
             lines.push(`${indent}  startTime: ${yamlString(entry.startTime)}`);
         if (entry.endTime !== undefined)
             lines.push(`${indent}  endTime: ${yamlString(entry.endTime)}`);
+        if (entry.category !== undefined)
+            lines.push(`${indent}  category: ${yamlString(entry.category)}`);
+        if (entry.color !== undefined)
+            lines.push(`${indent}  color: ${yamlString(entry.color)}`);
+        if (entry.note !== undefined)
+            lines.push(`${indent}  note: ${yamlString(entry.note)}`);
+        if (entry.tags !== undefined && entry.tags.length > 0) {
+            lines.push(`${indent}  tags:`);
+            for (const tag of entry.tags)
+                lines.push(`${indent}    - ${yamlString(tag)}`);
+        }
         if (entry.subEntries !== undefined && entry.subEntries.length > 0) {
             lines.push(`${indent}  subEntries:`);
             lines.push(...yamlEntryLines(entry.subEntries, indent + "    "));
