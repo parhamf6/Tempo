@@ -1565,17 +1565,71 @@ details.tempo-breakdown[open] .tempo-breakdown-body {
     font-variant-numeric: tabular-nums;
 }
 
-/* category picker beside the new-segment name box in the controls pill */
-.tempo-category-box {
+/* category picker beside the new-segment name box in the controls pill.
+   Obsidian's .dropdown paints its arrow as a background-image SVG plus a
+   radial-gradient dot, and those rules out-specify a plain class override —
+   so these selectors are prefixed with .tempo-container to win the cascade
+   and wipe ALL of it. The wrapper renders the one chevron instead. */
+.tempo-container .tempo-category-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.tempo-container select.tempo-category-box,
+.tempo-container .tempo-category-box {
     flex: 0 1 auto;
     min-width: 0;
     max-width: 130px;
-    padding: 8px 10px;
+    padding: 8px 22px 8px 10px;
     border: none;
     background: transparent;
+    background-image: none;
+    background-blend-mode: normal;
     color: var(--text-muted);
     font-size: var(--font-ui-smaller);
     box-shadow: none;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.tempo-container select.tempo-category-box:hover,
+.tempo-container .tempo-category-box:hover {
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+}
+
+/* in case a theme/browser still paints a native arrow */
+.tempo-container .tempo-category-box::-ms-expand {
+    display: none;
+}
+
+/* our one chevron, on top of the select */
+.tempo-container .tempo-category-chevron {
+    position: absolute;
+    inset-inline-end: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    color: var(--text-faint);
+}
+
+.tempo-container .tempo-category-chevron svg {
+    width: 12px;
+    height: 12px;
+}
+
+.tempo-container .tempo-category-wrap:hover .tempo-category-chevron {
+    color: var(--text-muted);
 }
 
 /* ---------- color swatch popover (context menu) ---------- */

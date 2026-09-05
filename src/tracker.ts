@@ -211,12 +211,17 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
     attachNameSuggestions(newSegmentNameBox, {
         getSuggestions: () => settings.suggestedSegmentNames.split("\n")
     });
-    let categoryBox = new DropdownComponent(controls)
+    // the wrapper pairs the select with our own single chevron; native and
+    // theme dropdown chrome is stripped via CSS so exactly one arrow shows
+    const categoryWrap = controls.createDiv({cls: "tempo-category-wrap"});
+    let categoryBox = new DropdownComponent(categoryWrap)
         .addOption("", "Category…")
         .setValue("");
     for (const category of settings.categories)
         categoryBox.addOption(category.name, category.name);
     categoryBox.selectEl.addClass("tempo-category-box");
+    const categoryChevron = categoryWrap.createSpan({cls: "tempo-category-chevron", attr: {"aria-hidden": "true"}});
+    setIcon(categoryChevron, "chevron-down");
     categoryBox.setDisabled(running);
     categoryBox.onChange(value => {
         pendingCategory = value;
