@@ -1457,7 +1457,8 @@ details.tempo-breakdown[open] .tempo-breakdown-body {
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
 }
 
-/* note icon after the name, opens the details modal on click */
+/* note icon after the name; hover shows the note tooltip, click opens
+   the details editor */
 .tempo-note-icon {
     display: inline-flex;
     align-items: center;
@@ -1482,7 +1483,8 @@ details.tempo-breakdown[open] .tempo-breakdown-body {
     height: 13px;
 }
 
-/* rendered note hover popover, positioned inside the table wrapper */
+/* rendered note hover tooltip, positioned inside the table wrapper;
+   hidden unless shown */
 .tempo-note-pop {
     position: absolute;
     z-index: 60;
@@ -1493,6 +1495,18 @@ details.tempo-breakdown[open] .tempo-breakdown-body {
     border-radius: var(--radius-m, 10px);
     box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.15));
     padding: 8px 10px;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-2px);
+    transition: opacity 120ms ease, transform 120ms ease, visibility 120ms;
+    pointer-events: none;
+}
+
+.tempo-note-pop.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
 }
 
 .tempo-note-pop-body {
@@ -1500,14 +1514,6 @@ details.tempo-breakdown[open] .tempo-breakdown-body {
     max-height: 220px;
     overflow-y: auto;
     color: var(--text-normal);
-}
-
-.tempo-note-pop-body > :first-child {
-    margin-top: 0;
-}
-
-.tempo-note-pop-body > :last-child {
-    margin-bottom: 0;
 }
 
 /* second line of the name cell: category chip + tag chips */

@@ -143,7 +143,8 @@ Then copy the three built files into your vault:
   open the segment dialog: rename it, choose a category, add tags (with
   autocomplete from your suggested tags and the tags already used in the
   tracker), pick a color override, and write a markdown note with a live
-  preview. The note icon in the row shows a rendered preview on hover.
+  preview. Hovering the note icon in the row shows a rendered tooltip;
+  clicking the icon opens this dialog.
 - Right-click a row for quick actions: **Set color**, **Set category**, and
   **Clear color**.
 - Exports carry the metadata: the markdown table shows `name (category)

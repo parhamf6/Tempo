@@ -939,10 +939,7 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
     if (ownNote) {
         let noteIcon = nameWrap.createSpan({cls: "tempo-note-icon", attr: {"aria-label": "Note", "tabindex": "0"}});
         setIcon(noteIcon, "sticky-note");
-        attachNotePopover(app, noteIcon, ownNote, getFile, component);
-        noteIcon.addEventListener("click", () => {
-            void openDetailsModal();
-        });
+        attachNotePopover(app, noteIcon, ownNote, getFile, component, () => void openDetailsModal());
     }
     let startField = new EditableTimestampField(row, entry.startTime!, settings);
     let endField = new EditableTimestampField(row, entry.endTime!, settings);
@@ -1234,10 +1231,16 @@ async function renderNoteNodes(app: App, note: string, getFile: GetFile, compone
     return nodes;
 }
 
-// Hover/focus popover that renders a segment's markdown note near its icon.
-// It lives inside the table wrapper (so it is torn down with the block on
-// re-render) and is positioned absolutely against that wrapper.
-function attachNotePopover(app: App, anchor: HTMLElement, note: string, getFile: GetFile, component: Component): void {
+const NOTE_POPOVER_SHOW_DELAY = 250;
+const NOTE_POPOVER_HIDE_DELAY = 200;
+
+// Working hover tooltip for a segment's note: hidden until the pointer
+// rests on the sticky-note icon, stays open while the pointer is inside
+// it (so links and long notes are usable), and hides shortly after the
+// pointer leaves both. Clicking the icon opens the details editor instead.
+// The popover lives inside the table wrapper so it is torn down with the
+// block on re-render, and is positioned absolutely against that wrapper.
+function attachNotePopover(app: App, anchor: HTMLElement, note: string, getFile: GetFile, component: Component, onEdit: () => void): void {
     const wrap = anchor.closest<HTMLElement>(".tempo-table-wrap");
     if (!wrap) {
         // no table wrapper (unlikely): degrade to a plain-text title tooltip
@@ -1246,7 +1249,10 @@ function attachNotePopover(app: App, anchor: HTMLElement, note: string, getFile:
     }
     const pop = wrap.createDiv({cls: "tempo-note-pop"});
     const body = pop.createDiv({cls: "tempo-note-pop-body"});
-    let shown = false;
+    let overAnchor = false;
+    let overPop = false;
+    let hideTimer: number | undefined;
+    let showTimer: number | undefined;
 
     const place = (): void => {
         const iconR = anchor.getBoundingClientRect();
@@ -1261,26 +1267,82 @@ function attachNotePopover(app: App, anchor: HTMLElement, note: string, getFile:
         pop.style.left = `${left}px`;
     };
 
-    const show = (): void => {
-        shown = true;
-        pop.addClass("is-visible");
-        void renderNoteNodes(app, note, getFile, component).then(nodes => {
-            if (!shown)
-                return;
-            body.empty();
-            body.append(...nodes.map(n => n.cloneNode(true)));
-            place();
-        });
-    };
-    const hide = (): void => {
-        shown = false;
-        pop.removeClass("is-visible");
+    const sync = (): void => {
+        const visible = overAnchor || overPop;
+        if (visible) {
+            pop.addClass("is-visible");
+            void renderNoteNodes(app, note, getFile, component).then(nodes => {
+                if (!(overAnchor || overPop))
+                    return;
+                body.empty();
+                body.append(...nodes.map(n => n.cloneNode(true)));
+                place();
+            });
+        } else {
+            pop.removeClass("is-visible");
+        }
     };
 
-    anchor.addEventListener("mouseenter", show);
-    anchor.addEventListener("mouseleave", hide);
-    anchor.addEventListener("focus", show);
-    anchor.addEventListener("blur", hide);
+    // hide on a short delay so moving from the icon into the popover does
+    // not close it; cancel pending hides/shows on every state change
+    const scheduleHide = (): void => {
+        window.clearTimeout(hideTimer);
+        hideTimer = window.setTimeout(() => {
+            hideTimer = undefined;
+            if (!overAnchor && !overPop) {
+                overAnchor = false;
+                overPop = false;
+                sync();
+            }
+        }, NOTE_POPOVER_HIDE_DELAY);
+    };
+
+    const scheduleShow = (): void => {
+        window.clearTimeout(showTimer);
+        showTimer = window.setTimeout(() => {
+            showTimer = undefined;
+            sync();
+        }, NOTE_POPOVER_SHOW_DELAY);
+    };
+
+    anchor.addEventListener("mouseenter", () => {
+        overAnchor = true;
+        window.clearTimeout(hideTimer);
+        scheduleShow();
+    });
+    anchor.addEventListener("mouseleave", () => {
+        overAnchor = false;
+        window.clearTimeout(showTimer);
+        if (overPop) {
+            scheduleHide();
+            return;
+        }
+        sync();
+    });
+    pop.addEventListener("mouseenter", () => {
+        overPop = true;
+        window.clearTimeout(hideTimer);
+    });
+    pop.addEventListener("mouseleave", () => {
+        overPop = false;
+        window.clearTimeout(showTimer);
+        scheduleHide();
+    });
+    anchor.addEventListener("focus", () => {
+        overAnchor = true;
+        sync();
+    });
+    anchor.addEventListener("blur", () => {
+        overAnchor = false;
+        sync();
+    });
+    // click keeps its editor role: the tooltip is for reading, the dialog
+    // is for editing
+    anchor.addEventListener("click", (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onEdit();
+    });
 }
 
 // Right-click menu for one row: full details plus quick category/color actions
