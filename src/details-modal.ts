@@ -2,6 +2,14 @@ import {App, ButtonComponent, Component, DropdownComponent, MarkdownRenderer, Mo
 import {Category, colorVar, isColorToken, MetaNode} from "./meta";
 import {createColorPicker} from "./color-picker";
 
+// The category this segment currently shows via an ancestor (its own field is
+// unset). Lets the editor reflect reality and explain that "No category" will
+// stop the inheritance.
+export interface InheritedCategory {
+    name: string;
+    sourceName: string;
+}
+
 // Context the tracker supplies so the modal can mutate the entry and tell the
 // caller to persist. The modal writes straight onto the entry object and then
 // invokes onSaved; the caller owns the note write.
@@ -13,13 +21,19 @@ export interface EntryDetailsContext {
     treeTags: string[];
     // active note path for markdown previews
     sourcePath: string;
+    // category resolved through an ancestor (own field unset), if any
+    inherited?: InheritedCategory;
     // called once the modal has applied edits and the caller should save
     onSaved: () => void | Promise<void>;
 }
 
 interface Draft {
     name: string;
+    // selected category in the dropdown: "" = no category
     category: string;
+    // false until the user actually changes the dropdown, so a no-op save
+    // never rewrites an inherited (unset) category into an explicit value
+    categoryTouched: boolean;
     color?: string;
     tags: string[];
     note: string;
@@ -32,9 +46,17 @@ export class EntryDetailsModal extends Modal {
 
     constructor(app: App, private entry: MetaNode, private ctx: EntryDetailsContext) {
         super(app);
+        // show the effective category (own value, or the inherited one) so the
+        // dropdown never lies about why the row displays a group
+        const initialCategory = typeof entry.category === "string"
+            ? entry.category
+            : entry.category === null
+                ? ""
+                : ctx.inherited?.name ?? "";
         this.draft = {
             name: entry.name,
-            category: entry.category ?? "",
+            category: initialCategory,
+            categoryTouched: false,
             color: entry.color,
             tags: [...(entry.tags ?? [])],
             note: entry.note ?? ""
@@ -89,15 +111,49 @@ export class EntryDetailsModal extends Modal {
         labelRow.createEl("label", {text: "Category", cls: "tempo-details-label"});
 
         this.categoryDropdown = new DropdownComponent(row)
-            .addOption("", "No category")
-            .setValue(this.draft.category);
+            .addOption("", "No category");
+        const known = new Set(this.ctx.categories.map(c => c.name));
         for (const category of this.ctx.categories)
             this.categoryDropdown.addOption(category.name, category.name);
+        // a category no longer present in settings (own value, or one that is
+        // inherited from an ancestor) still needs an option so the dropdown can
+        // display what the row shows
+        if (this.draft.category && !known.has(this.draft.category)) {
+            const isInherited = this.ctx.inherited?.name === this.draft.category;
+            this.categoryDropdown.addOption(this.draft.category, isInherited ? `${this.draft.category} (inherited)` : this.draft.category);
+        }
+        this.categoryDropdown.setValue(this.draft.category);
         this.categoryDropdown.selectEl.addClass("tempo-category-dropdown");
         this.categoryDropdown.onChange(value => {
             this.draft.category = value;
+            this.draft.categoryTouched = true;
+            this.refreshCategoryHint();
             this.refreshColorHint();
         });
+
+        this.categoryHint = host.createDiv({cls: "tempo-details-hint"});
+        this.refreshCategoryHint();
+    }
+
+    private categoryHint!: HTMLElement;
+
+    private refreshCategoryHint(): void {
+        if (!this.categoryHint)
+            return;
+        const hint = this.categoryHint;
+        hint.empty();
+        const ownIsSet = typeof this.entry.category === "string";
+        const inherited = this.ctx.inherited;
+        if (this.draft.category === "") {
+            if (!this.draft.categoryTouched && !ownIsSet && !inherited)
+                hint.createSpan({text: "No category."});
+            else
+                hint.createSpan({text: "No category — this segment will not inherit a parent's group."});
+        } else if (!this.draft.categoryTouched && !ownIsSet && inherited) {
+            hint.createSpan({text: `Currently using “${inherited.name}” inherited from “${inherited.sourceName}”. Pick another category, or No category to clear it here.`});
+        } else if (this.draft.categoryTouched) {
+            hint.createSpan({text: `Set to “${this.draft.category}”.`});
+        }
     }
 
     private renderColorField(host: HTMLElement): void {
@@ -338,7 +394,10 @@ export class EntryDetailsModal extends Modal {
     private async apply(): Promise<void> {
         const {entry, draft} = this;
         entry.name = draft.name.trim() || entry.name;
-        entry.category = draft.category || undefined;
+        // only write a category when the user actually changed the dropdown;
+        // picking "No category" stores null (explicit none, blocks inheritance)
+        if (draft.categoryTouched)
+            entry.category = draft.category || null;
         entry.color = draft.color;
         entry.tags = draft.tags.length > 0 ? draft.tags : undefined;
         entry.note = draft.note.trim() || undefined;

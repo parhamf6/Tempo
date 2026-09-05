@@ -88,6 +88,10 @@ export function displayStats(
         if (value === groupBy())
             return;
         state.groupBy = value;
+        // filters always belong to the visible dimension; switching tabs drops
+        // them so an invisible (but still active) filter can never skew results
+        activeFilters.categories = [];
+        activeFilters.tags = [];
         const idx = groupByOptions.findIndex(o => o.type === value);
         groupByPills.forEach((el, i) => el.toggleClass("is-active", i === idx));
         await onChange();
@@ -116,7 +120,7 @@ export function displayStats(
 
             // remember ephemeral view state so background refreshes don't disturb the reader
             const uiState = captureStatsUiState(resultsSection);
-            renderFacetChips(facetsSection, result, settings, activeFilters, () => void refresh());
+            renderFacetChips(facetsSection, result, settings, activeFilters, groupBy(), () => void refresh());
             renderResults(resultsSection, result, settings, {
                 selected,
                 filteredResult,
@@ -641,57 +645,76 @@ function renderGroupBy(
 }
 
 // Category/tag chips derived from the facets present in the current range.
-// Clicking toggles membership in the session-only filter set (union within a
-// dimension, AND across dimensions); "Clear" resets both.
+// Chips always match the active grouping dimension: "By category" offers only
+// category chips, "By tag" only tag chips, and "By name" offers no chips at
+// all. Clicking toggles membership in the session-only filter set; "Clear"
+// resets it.
 function renderFacetChips(
     container: HTMLElement,
     result: StatsResult,
     settings: TempoSettings,
     filters: {categories: string[], tags: string[]},
+    groupBy: StatsGroupBy,
     onRefresh: () => void
 ): void {
     container.empty();
     const facets = result.facets;
-    if (facets.categories.length === 0 && facets.tags.length === 0)
+    // grouping by name has no facet dimension of its own
+    if (groupBy === "name")
         return;
-
-    const anyActive = filters.categories.length > 0 || filters.tags.length > 0;
-
-    const toggle = (kind: "categories" | "tags", value: string): void => {
-        const list = filters[kind];
-        const key = value.toLocaleLowerCase();
-        const idx = list.findIndex(v => v.toLocaleLowerCase() === key);
-        if (idx >= 0)
-            list.splice(idx, 1);
-        else
-            list.push(value);
-        onRefresh();
-    };
-
-    for (const category of facets.categories) {
-        const chip = container.createEl("button", {cls: "tempo-facet-chip", attr: {type: "button", title: "Filter by category"}});
-        const dot = chip.createSpan({cls: "tempo-chip-dot"});
-        const def = settings.categories.find(c => c.name === category);
-        if (def?.color)
-            dot.style.background = colorVar(def.color)!;
-        chip.createSpan({cls: "tempo-facet-chip-label", text: category});
-        const active = filters.categories.some(v => v.toLocaleLowerCase() === category.toLocaleLowerCase());
-        chip.toggleClass("is-active", active);
-        chip.addEventListener("click", () => toggle("categories", category));
+    if (groupBy === "category") {
+        if (facets.categories.length === 0)
+            return;
+        for (const category of facets.categories) {
+            const chip = container.createEl("button", {cls: "tempo-facet-chip", attr: {type: "button", title: "Filter by category"}});
+            const dot = chip.createSpan({cls: "tempo-chip-dot"});
+            const def = settings.categories.find(c => c.name === category);
+            if (def?.color)
+                dot.style.background = colorVar(def.color)!;
+            chip.createSpan({cls: "tempo-facet-chip-label", text: category});
+            const active = filters.categories.some(v => v.toLocaleLowerCase() === category.toLocaleLowerCase());
+            chip.toggleClass("is-active", active);
+            chip.addEventListener("click", () => {
+                const list = filters.categories;
+                const key = category.toLocaleLowerCase();
+                const idx = list.findIndex(v => v.toLocaleLowerCase() === key);
+                if (idx >= 0)
+                    list.splice(idx, 1);
+                else
+                    list.push(category);
+                onRefresh();
+            });
+        }
+    } else {
+        if (facets.tags.length === 0)
+            return;
+        for (const tag of facets.tags) {
+            const chip = container.createEl("button", {cls: "tempo-facet-chip", attr: {type: "button", title: "Filter by tag"}});
+            chip.createSpan({cls: "tempo-facet-chip-label", text: `#${tag}`});
+            const active = filters.tags.some(v => v.toLocaleLowerCase() === tag.toLocaleLowerCase());
+            chip.toggleClass("is-active", active);
+            chip.addEventListener("click", () => {
+                const list = filters.tags;
+                const key = tag.toLocaleLowerCase();
+                const idx = list.findIndex(v => v.toLocaleLowerCase() === key);
+                if (idx >= 0)
+                    list.splice(idx, 1);
+                else
+                    list.push(tag);
+                onRefresh();
+            });
+        }
     }
-    for (const tag of facets.tags) {
-        const chip = container.createEl("button", {cls: "tempo-facet-chip", attr: {type: "button", title: "Filter by tag"}});
-        chip.createSpan({cls: "tempo-facet-chip-label", text: `#${tag}`});
-        const active = filters.tags.some(v => v.toLocaleLowerCase() === tag.toLocaleLowerCase());
-        chip.toggleClass("is-active", active);
-        chip.addEventListener("click", () => toggle("tags", tag));
-    }
-    if (anyActive) {
+
+    const visibleFilters = groupBy === "category" ? filters.categories : filters.tags;
+    if (visibleFilters.length > 0) {
         const clear = new ButtonComponent(container)
             .setButtonText("Clear filters")
-            .onClick(async () => {
-                filters.categories.splice(0);
-                filters.tags.splice(0);
+            .onClick(() => {
+                if (groupBy === "category")
+                    filters.categories.splice(0);
+                else
+                    filters.tags.splice(0);
                 onRefresh();
             });
         clear.buttonEl.addClass("tempo-facet-clear");

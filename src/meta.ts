@@ -57,7 +57,10 @@ export interface ResolvedCategory extends Category {
 export interface MetaNode {
     name: string;
     tags?: string[];
-    category?: string;
+    // undefined = unset (inherits an ancestor's category),
+    // string = this segment's own category, null = explicitly NO category
+    // (blocks inheritance — the user removed the group from this segment)
+    category?: string | null;
     color?: string;
     note?: string;
     subEntries?: MetaNode[];
@@ -113,7 +116,9 @@ function normalizeOptionalString(raw: unknown): string | undefined {
 export function normalizeEntryMeta(entry: MetaNode): void {
     if (entry.tags != null)
         entry.tags = normalizeTags(entry.tags);
-    if (entry.category != null)
+    // only string categories are normalized; null (explicit no-category) and
+    // undefined (inherit) pass through untouched
+    if (typeof entry.category === "string")
         entry.category = normalizeOptionalString(entry.category);
     if (entry.color != null)
         entry.color = isColorToken(entry.color) ? entry.color : undefined;
@@ -129,9 +134,14 @@ export function normalizeEntryMeta(entry: MetaNode): void {
 
 // Resolves the single-select category an entry displays/aggregates under.
 // Own value wins; otherwise the nearest ancestor that has one provides it.
+// An explicit `category: null` (the user removed the group) stops the search
+// immediately — that segment is genuinely uncategorized and does NOT fall back
+// to an ancestor.
 export function resolveCategory(node: MetaNode, ancestors: MetaNode[] = []): { value: string, source: MetaNode } | undefined {
     for (const candidate of [node, ...ancestors]) {
-        const category = candidate.category?.trim();
+        if (candidate.category === null)
+            return undefined;
+        const category = typeof candidate.category === "string" ? candidate.category.trim() : "";
         if (category)
             return {value: category, source: candidate};
     }

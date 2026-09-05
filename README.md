@@ -33,7 +33,9 @@ https://github.com/user-attachments/assets/33966c3e-238d-4aa4-9967-61d2681e93fa
 - **Rich segment metadata** — give any segment or child segment a **category**
   (single-select, from a global list you manage), any number of **tags**, a
   **color**, and a **note**. Colors follow your theme; children inherit their
-  parent's category/color (and union its tags) unless they set their own.
+  parent's category/color (and union its tags) unless they set their own —
+  choosing **No category** on a segment always clears it for good, even when
+  its parent is categorized.
 - **Details editor & quick actions** — click a row's tags icon (or right-click
   the row) to edit a segment's metadata in a dialog; set category/color from a
   right-click menu without opening it.
@@ -133,6 +135,10 @@ Then copy the three built files into your vault:
   category chip and up to three `#tag` chips (dashed chips are inherited from
   an ancestor). The row itself gets a colored left rail and a dot before its
   name; the running timer and status bar reuse the same color.
+- Pick **No category** from a row's right-click menu (or the details dialog)
+  to remove a group for good — that segment keeps showing no category even if
+  its parent has one. In the details dialog, an inherited category is shown
+  with a note saying where it comes from.
 - Click a row's **tags icon** (or right-click the row → **Edit details**) to
   open the segment dialog: rename it, choose a category, add tags (with
   autocomplete from your suggested tags and the tags already used in the

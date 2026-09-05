@@ -1855,6 +1855,11 @@ details.tempo-breakdown[open] .tempo-breakdown-body {
     margin: 8px 0;
 }
 
+/* no chips rendered ("By name" has no facet dimension) → collapse the row */
+.tempo-stats-facets:empty {
+    display: none;
+}
+
 .tempo-facet-chip {
     display: inline-flex;
     align-items: center;

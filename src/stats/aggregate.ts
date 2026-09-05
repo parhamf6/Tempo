@@ -85,9 +85,13 @@ function prepareSegments(entries: Entry[]): PreparedSegment[] {
     const unionTags = (entry: Entry, ancestors: Entry[]): string[] =>
         dedupeTags([...(entry.tags ?? []), ...ancestors.flatMap(a => a.tags ?? [])]);
 
+    // mirrors meta.resolveCategory: an explicit `category: null` on a segment
+    // means the user removed the group — it never falls back to an ancestor
     const effectiveCategory = (entry: Entry, ancestors: Entry[]): string | undefined => {
         for (const node of [entry, ...ancestors]) {
-            const category = node.category?.trim();
+            if (node.category === null)
+                return undefined;
+            const category = typeof node.category === "string" ? node.category.trim() : "";
             if (category)
                 return category;
         }

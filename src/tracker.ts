@@ -22,7 +22,9 @@ export interface Entry {
     // optional metadata (rich segments), all stored only when set so old
     // trackers round-trip unchanged
     tags?: string[];
-    category?: string;
+    // undefined = inherit an ancestor's category, string = own category,
+    // null = explicitly no category (stops inheritance)
+    category?: string | null;
     color?: string;
     note?: string;
 }
@@ -964,11 +966,18 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
     async function openDetailsModal(): Promise<void> {
         if (nameField.editing())
             return;
+        // tell the editor which category (if any) an unset segment inherits,
+        // so it can show why the row displays a group
+        const inheritedCategory = resolveCategory(entry, ancestors);
+        const inherited = inheritedCategory && inheritedCategory.source !== entry
+            ? {name: inheritedCategory.value, sourceName: inheritedCategory.source.name}
+            : undefined;
         const modal = new EntryDetailsModal(app, entry, {
             categories: settings.categories,
             suggestedTags: settings.suggestedTags,
             treeTags: collectTreeTags(tracker.entries),
             sourcePath: getFile(),
+            inherited,
             onSaved: () => saveTracker(app, tracker, getFile(), getSectionInfo(), settings)
         });
         modal.open();
@@ -983,7 +992,7 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
         e.preventDefault();
         if (nameField.editing())
             return;
-        showEntryMenu(app, e, entry, settings, () => void openDetailsModal(),
+        showEntryMenu(app, e, entry, ancestors, settings, () => void openDetailsModal(),
             () => void saveTracker(app, tracker, getFile(), getSectionInfo(), settings));
     });
 
@@ -1277,7 +1286,7 @@ function attachNotePopover(app: App, anchor: HTMLElement, note: string, getFile:
 // Right-click menu for one row: full details plus quick category/color actions
 // that mutate the entry and let the caller persist. Color uses a swatch
 // popover, category a nested menu re-shown at the same position.
-function showEntryMenu(app: App, evt: MouseEvent, entry: Entry, settings: TempoSettings, openDetails: () => void, onSaved: () => void): void {
+function showEntryMenu(app: App, evt: MouseEvent, entry: Entry, ancestors: Entry[], settings: TempoSettings, openDetails: () => void, onSaved: () => void): void {
     const at = {x: evt.clientX, y: evt.clientY};
     const menu = new Menu();
 
@@ -1304,21 +1313,26 @@ function showEntryMenu(app: App, evt: MouseEvent, entry: Entry, settings: TempoS
             });
         });
     }
+    // what the row currently shows (own value, or an ancestor's when unset);
+    // picking "No category" stores null so the removal also wins over an
+    // inherited category
+    const effective = resolveCategory(entry, ancestors);
     menu.addItem(item => {
         item.setTitle("Set category…").setIcon("folder");
         item.onClick(() => {
             const sub = new Menu();
             const apply = (name: string): void => {
-                entry.category = name || undefined;
+                entry.category = name || null;
                 onSaved();
             };
             sub.addItem(subItem => {
-                subItem.setTitle("No category").setChecked(!entry.category);
+                subItem.setTitle("No category").setChecked(!effective);
                 subItem.onClick(() => apply(""));
             });
             for (const category of settings.categories) {
+                const isCurrent = effective?.value === category.name;
                 sub.addItem(subItem => {
-                    subItem.setTitle(category.name).setChecked(entry.category === category.name);
+                    subItem.setTitle(category.name).setChecked(isCurrent);
                     subItem.onClick(() => apply(category.name));
                 });
             }

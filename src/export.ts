@@ -33,7 +33,7 @@ function strippedEntry(entry: Entry): object {
         ret.endTime = entry.endTime;
     if (entry.tags !== undefined)
         ret.tags = entry.tags;
-    if (entry.category !== undefined)
+    if (typeof entry.category === "string")
         ret.category = entry.category;
     if (entry.color !== undefined)
         ret.color = entry.color;
@@ -83,7 +83,7 @@ function tomlEntryLines(entry: Entry, path: string): string[] {
         lines.push(`endTime = ${tomlString(entry.endTime)}`);
     if (entry.tags !== undefined)
         lines.push(`tags = [${entry.tags.map(t => tomlString(t)).join(", ")}]`);
-    if (entry.category !== undefined)
+    if (typeof entry.category === "string")
         lines.push(`category = ${tomlString(entry.category)}`);
     if (entry.color !== undefined)
         lines.push(`color = ${tomlString(entry.color)}`);
@@ -119,7 +119,7 @@ function yamlEntryLines(entries: Entry[], indent: string): string[] {
             lines.push(`${indent}  startTime: ${yamlString(entry.startTime)}`);
         if (entry.endTime !== undefined)
             lines.push(`${indent}  endTime: ${yamlString(entry.endTime)}`);
-        if (entry.category !== undefined)
+        if (typeof entry.category === "string")
             lines.push(`${indent}  category: ${yamlString(entry.category)}`);
         if (entry.color !== undefined)
             lines.push(`${indent}  color: ${yamlString(entry.color)}`);
