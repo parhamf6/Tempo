@@ -985,6 +985,29 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
         modal.open();
     }
 
+    // actions shared by the row's context menu and the small-screen kebab;
+    // move up/down live only in menus (the drag handle covers desktop)
+    const entryMenuActions: EntryMenuActions = {
+        edit: () => void handleEdit(),
+        remove: async () => {
+            const confirmed = await showConfirm(app, "Are you sure you want to delete this entry?");
+            if (!confirmed)
+                return;
+            removeEntry(tracker.entries, entry);
+            await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        },
+        moveUp: () => {
+            if (moveEntryByOffset(tracker.entries, entry, -1, settings))
+                void saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        },
+        moveDown: () => {
+            if (moveEntryByOffset(tracker.entries, entry, 1, settings))
+                void saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        },
+        canMoveUp: displayIndex > 0,
+        canMoveDown: displayIndex >= 0 && displayIndex < parentEntries.length - 1
+    };
+
     // right-click context menu with quick category/color/tag actions; text
     // inputs keep their native paste menu
     row.addEventListener("contextmenu", (e: MouseEvent) => {
@@ -995,7 +1018,7 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
         if (nameField.editing())
             return;
         showEntryMenu(app, e, entry, ancestors, settings, () => void openDetailsModal(),
-            () => void saveTracker(app, tracker, getFile(), getSectionInfo(), settings));
+            () => void saveTracker(app, tracker, getFile(), getSectionInfo(), settings), entryMenuActions);
     });
 
     let expandButton = new ButtonComponent(nameWrap)
@@ -1031,26 +1054,6 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
 
     let entryButtons = row.createEl("td");
     entryButtons.addClass("tempo-table-buttons");
-    void new ButtonComponent(entryButtons)
-        .setClass("clickable-icon")
-        .setClass("tempo-action-move")
-        .setTooltip("Move up")
-        .setIcon("chevron-up")
-        .setDisabled(displayIndex <= 0)
-        .onClick(async () => {
-            if (moveEntryByOffset(tracker.entries, entry, -1, settings))
-                await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
-        });
-    void new ButtonComponent(entryButtons)
-        .setClass("clickable-icon")
-        .setClass("tempo-action-move")
-        .setTooltip("Move down")
-        .setIcon("chevron-down")
-        .setDisabled(displayIndex < 0 || displayIndex >= parentEntries.length - 1)
-        .onClick(async () => {
-            if (moveEntryByOffset(tracker.entries, entry, 1, settings))
-                await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
-        });
     let playButton = new ButtonComponent(entryButtons)
         .setClass("clickable-icon")
         .setClass("tempo-action-play")
@@ -1158,6 +1161,18 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
                 return;
             removeEntry(tracker.entries, entry);
             await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        });
+
+    // overflow menu for small screens / touch: collapses the row actions
+    // into one button that opens the same menu as right-click
+    void new ButtonComponent(entryButtons)
+        .setClass("clickable-icon")
+        .setClass("tempo-action-kebab")
+        .setTooltip("More actions")
+        .setIcon("more-vertical")
+        .onClick((evt: MouseEvent) => {
+            showEntryMenu(app, evt, entry, ancestors, settings, () => void openDetailsModal(),
+                () => void saveTracker(app, tracker, getFile(), getSectionInfo(), settings), entryMenuActions);
         });
 
     if (entry.subEntries) {
@@ -1352,11 +1367,33 @@ function attachNotePopover(app: App, anchor: HTMLElement, note: string, getFile:
 
 // Right-click menu for one row: full details plus quick category/color actions
 // that mutate the entry and let the caller persist. Color uses a swatch
-// popover, category a nested menu re-shown at the same position.
-function showEntryMenu(app: App, evt: MouseEvent, entry: Entry, ancestors: Entry[], settings: TempoSettings, openDetails: () => void, onSaved: () => void): void {
+// popover, category a nested menu re-shown at the same position. ExtraActions
+// adds the structural row commands (edit/delete/move) so the same menu also
+// serves the small-screen kebab, where no inline buttons exist for them.
+interface EntryMenuActions {
+    edit: () => void;
+    remove: () => Promise<void>;
+    moveUp: () => void;
+    moveDown: () => void;
+    canMoveUp: boolean;
+    canMoveDown: boolean;
+}
+
+function showEntryMenu(app: App, evt: MouseEvent, entry: Entry, ancestors: Entry[], settings: TempoSettings, openDetails: () => void, onSaved: () => void, actions?: EntryMenuActions): void {
     const at = {x: evt.clientX, y: evt.clientY};
     const menu = new Menu();
 
+    if (actions) {
+        menu.addItem(item => {
+            item.setTitle("Move up").setIcon("chevron-up").setDisabled(!actions.canMoveUp);
+            item.onClick(() => actions.moveUp());
+        });
+        menu.addItem(item => {
+            item.setTitle("Move down").setIcon("chevron-down").setDisabled(!actions.canMoveDown);
+            item.onClick(() => actions.moveDown());
+        });
+        menu.addSeparator();
+    }
     menu.addItem(item => {
         item.setTitle("Edit details").setIcon("tags");
         item.onClick(() => openDetails());
@@ -1406,6 +1443,18 @@ function showEntryMenu(app: App, evt: MouseEvent, entry: Entry, ancestors: Entry
             sub.showAtPosition(at);
         });
     });
+
+    if (actions) {
+        menu.addSeparator();
+        menu.addItem(item => {
+            item.setTitle("Edit").setIcon("pencil");
+            item.onClick(() => actions.edit());
+        });
+        menu.addItem(item => {
+            item.setTitle("Remove").setIcon("trash");
+            item.onClick(() => actions.remove());
+        });
+    }
 
     menu.showAtMouseEvent(evt);
 }

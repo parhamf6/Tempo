@@ -472,10 +472,16 @@
     cursor: grabbing;
 }
 
-/* touch devices never hover: keep the handle faintly visible */
+/* touch devices never hover: keep the handle faintly visible, and keep the
+   row's primary actions visible (play + kebab; the rest are in the menu) */
 @media (hover: none) {
     .tempo-drag-handle {
         opacity: 0.55;
+    }
+
+    .tempo-container .tempo-table-buttons .tempo-action-play,
+    .tempo-container .tempo-table-buttons .tempo-action-kebab {
+        opacity: 1;
     }
 }
 
@@ -579,15 +585,6 @@ body.tempo-dragging {
     transform: scale(1.08);
 }
 
-/* move up/down → neutral muted, they only reorder */
-.tempo-action-move {
-    color: var(--text-muted);
-}
-
-.tempo-action-move:hover {
-    background: var(--background-modifier-hover);
-}
-
 /* play / continue → green, becomes orange while it's the running entry */
 .tempo-action-play {
     color: var(--color-green, var(--text-muted));
@@ -630,6 +627,34 @@ body.tempo-dragging {
 .tempo-action-delete:hover {
     background: rgba(var(--color-red-rgb, 0, 0, 0), 0.14);
     color: var(--color-red, var(--text-error));
+}
+
+/* kebab overflow button: hidden on desktop (where the row shows the full
+   button set), shown on small screens / touch instead */
+.tempo-action-kebab {
+    display: none;
+    color: var(--text-muted);
+}
+
+/* tablets and below, and touch devices in general, have no room (and no
+   hover) for sticky icons over the table data: keep play + kebab, fold
+   the rest into the kebab menu */
+@media (max-width: 900px), (hover: none) {
+    .tempo-container .tempo-table-buttons .tempo-action-edit,
+    .tempo-container .tempo-table-buttons .tempo-action-details,
+    .tempo-container .tempo-table-buttons .tempo-action-delete {
+        display: none;
+    }
+
+    .tempo-container .tempo-table-buttons .tempo-action-kebab {
+        display: inline-flex;
+    }
+
+    /* touch never hovers a row: the two primary actions stay visible */
+    .tempo-container .tempo-table-buttons .tempo-action-kebab,
+    .tempo-container .tempo-table-buttons .tempo-action-play {
+        opacity: 1;
+    }
 }
 
 /* ---------- Bottom copy buttons ---------- */
