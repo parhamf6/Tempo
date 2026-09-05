@@ -2,6 +2,7 @@ import {App, Component, MarkdownSectionInformation, Menu, Platform, setIcon, TFi
 import {Entry, formatDuration, getDuration, loadAllTrackers, saveTracker, Tracker} from "./tracker";
 import {TempoSettings} from "./settings";
 import {resolveSourceFiles} from "./stats/scan";
+import {colorVar, effectiveColorToken} from "./meta";
 
 // One currently running timer found somewhere in the scanned scope, with
 // enough context to act on it: stop it in its note, or open the note.
@@ -10,6 +11,8 @@ interface RunningTimer {
     section: MarkdownSectionInformation;
     tracker: Tracker;
     entry: Entry;
+    // ancestor path down to the running leaf (leaf excluded), for metadata
+    ancestors: Entry[];
 }
 
 // Per-file cache of the running timers found in a note, keyed by mtime so a
@@ -24,16 +27,16 @@ const timerCache = new Map<string, TimersCacheItem>();
 const SCAN_BATCH_SIZE = 8;
 
 function collectRunningTimers(file: TFile, section: MarkdownSectionInformation, tracker: Tracker, out: RunningTimer[]): void {
-    const walk = (entry: Entry): void => {
+    const walk = (entry: Entry, ancestors: Entry[]): void => {
         if (entry.subEntries) {
             for (const sub of entry.subEntries)
-                walk(sub);
+                walk(sub, [...ancestors, entry]);
         } else if (entry.startTime && !entry.endTime) {
-            out.push({file, section, tracker, entry});
+            out.push({file, section, tracker, entry, ancestors});
         }
     };
     for (const entry of tracker.entries)
-        walk(entry);
+        walk(entry, []);
 }
 
 // Status-bar indicators for running timers across the notes the user chose
@@ -170,6 +173,12 @@ export class RunningTimersStatusBar extends Component {
 
         const body = item.createDiv({cls: "tempo-status-body"});
         body.addEventListener("click", () => void this.openFile(timer));
+        const settings = this.getSettings();
+        const color = effectiveColorToken(timer.entry, timer.ancestors, settings.categories);
+        if (color) {
+            const dot = body.createSpan({cls: "tempo-status-dot"});
+            dot.style.background = colorVar(color)!;
+        }
         body.createSpan({cls: "tempo-status-name", text: timer.entry.name});
 
         const dur = body.createSpan({cls: "tempo-status-dur"});

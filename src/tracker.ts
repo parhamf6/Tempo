@@ -1,10 +1,13 @@
-import {MarkdownSectionInformation, ButtonComponent, TextComponent, TFile, MarkdownRenderer, Component, MarkdownRenderChild, App, setIcon} from "obsidian";
+import {MarkdownSectionInformation, ButtonComponent, DropdownComponent, TextComponent, TFile, MarkdownRenderer, Component, MarkdownRenderChild, App, setIcon, Menu} from "obsidian";
 import {moment} from "./moment";
 import {TempoSettings} from "./settings";
 import {ConfirmModal} from "./confirm-modal";
 import {makeRowDraggable} from "./drag";
 import {buildJson, buildToml, buildYaml, registerExportFormat, showExportMenu} from "./export";
 import {attachNameSuggestions} from "./autocomplete";
+import {normalizeEntryMeta, resolveCategory, resolveTags, resolveNote, resolveCategoryColor, effectiveColorToken, colorVar, collectTreeTags} from "./meta";
+import {EntryDetailsModal} from "./details-modal";
+import {showColorPopover} from "./color-picker";
 
 export interface Tracker {
     entries: Entry[];
@@ -16,6 +19,14 @@ export interface Entry {
     endTime?: string;
     subEntries?: Entry[];
     collapsed?: boolean;
+    // optional metadata (rich segments), all stored only when set so old
+    // trackers round-trip unchanged
+    tags?: string[];
+    // undefined = inherit an ancestor's category, string = own category,
+    // null = explicitly no category (stops inheritance)
+    category?: string | null;
+    color?: string;
+    note?: string;
 }
 
 registerExportFormat({id: "table", label: "Table", icon: "table", build: createMarkdownTable});
@@ -164,6 +175,21 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
 
     // add start/stop controls
     let controls = element.createDiv({ cls: "tempo-controls" });
+
+    // category a new segment should get: nothing unless the user picks one
+    // right before starting; the picker clears itself once a segment starts so
+    // every following segment starts with no metadata unless chosen anew
+    let pendingCategory = "";
+    const resetPendingCategory = (): void => {
+        pendingCategory = "";
+        categoryBox.setValue("");
+    };
+
+    const startSegment = (): void => {
+        startNewEntry(tracker, newSegmentNameBox.getValue(), settings, pendingCategory);
+        resetPendingCategory();
+    };
+
     let btn = new ButtonComponent(controls)
         .setClass("clickable-icon")
         .setIcon(`lucide-${running ? "stop" : "play"}-circle`)
@@ -172,7 +198,7 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
             if (running) {
                 endRunningEntry(tracker);
             } else {
-                startNewEntry(tracker, newSegmentNameBox.getValue(), settings);
+                startSegment();
             }
             await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
         });
@@ -185,10 +211,25 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
     attachNameSuggestions(newSegmentNameBox, {
         getSuggestions: () => settings.suggestedSegmentNames.split("\n")
     });
+    // the wrapper pairs the select with our own single chevron; native and
+    // theme dropdown chrome is stripped via CSS so exactly one arrow shows
+    const categoryWrap = controls.createDiv({cls: "tempo-category-wrap"});
+    let categoryBox = new DropdownComponent(categoryWrap)
+        .addOption("", "Category…")
+        .setValue("");
+    for (const category of settings.categories)
+        categoryBox.addOption(category.name, category.name);
+    categoryBox.selectEl.addClass("tempo-category-box");
+    const categoryChevron = categoryWrap.createSpan({cls: "tempo-category-chevron", attr: {"aria-hidden": "true"}});
+    setIcon(categoryChevron, "chevron-down");
+    categoryBox.setDisabled(running);
+    categoryBox.onChange(value => {
+        pendingCategory = value;
+    });
     newSegmentNameBox.inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
         if (e.key === "Enter" && !running) {
             e.preventDefault();
-            startNewEntry(tracker, newSegmentNameBox.getValue(), settings);
+            startSegment();
             void saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
         }
     });
@@ -300,7 +341,7 @@ export function displayTracker(app: App, tracker: Tracker, element: HTMLElement,
         // never have to search the tree for their own position
         const ordered = orderedEntries(tracker.entries, settings);
         for (let i = 0; i < ordered.length; i++)
-            addEditableTableRow(rowCtx, ordered[i]!, table, 0, tracker.entries, i, false);
+            addEditableTableRow(rowCtx, ordered[i]!, table, 0, tracker.entries, i, [], false);
 
         // add export button (format menu populated by registerExportFormat)
         let buttons = element.createDiv({ cls: "tempo-bottom" });
@@ -493,8 +534,10 @@ export function getRunningChain(entries: Entry[]): string[] | undefined {
 
 export function createMarkdownTable(tracker: Tracker, settings: TempoSettings): string {
     let table = [["Segment", "Start time", "End time", "Duration"]];
-    for (let entry of orderedEntries(tracker.entries, settings))
-        table.push(...createTableSection(entry, settings));
+    for (let entry of orderedEntries(tracker.entries, settings)) {
+        for (let row of exportRows(entry, settings))
+            table.push([`${row.label}${inlineMetaText(row)}`, row.start, row.end, row.duration]);
+    }
     table.push(["**Total**", "", "", `**${formatDuration(getTotalDuration(tracker.entries), settings)}**`]);
 
     let ret = "";
@@ -518,10 +561,20 @@ function createCsvCell(content: string): string {
 }
 
 export function createCsv(tracker: Tracker, settings: TempoSettings): string {
-    let ret = "";
+    let ret = [["Segment", "Category", "Tags", "Note", "Start time", "End time", "Duration"]].map(row => row.join(settings.csvDelimiter)).join("\n") + "\n";
     for (let entry of orderedEntries(tracker.entries, settings)) {
-        for (let row of createTableSection(entry, settings))
-            ret += row.map(createCsvCell).join(settings.csvDelimiter) + "\n";
+        for (let row of exportRows(entry, settings)) {
+            const fields = [
+                row.label,
+                row.category,
+                row.tags.join(" "),
+                row.note,
+                row.start,
+                row.end,
+                row.duration
+            ];
+            ret += fields.map(createCsvCell).join(settings.csvDelimiter) + "\n";
+        }
     }
     return ret;
 }
@@ -598,9 +651,13 @@ export function formatNameTemplate(template: string, counter: number): string {
 }
 
 function startSubEntry(entry: Entry, name: string, settings: TempoSettings): void {
-    // if this entry is not split yet, we add its time as a sub-entry instead
+    // if this entry is not split yet, we add its time as a sub-entry instead.
+    // Metadata is copied onto the first part so the elapsed time keeps its
+    // category/tags/color, but the note stays on the group — notes describe
+    // the single entry they sit on, they never follow a split.
     if (!entry.subEntries) {
-        entry.subEntries = [{ ...entry, name: formatNameTemplate(settings.subEntryNameTemplate, 1) }];
+        const {note: _note, ...rest} = entry;
+        entry.subEntries = [{ ...rest, name: formatNameTemplate(settings.subEntryNameTemplate, 1) }];
         entry.startTime = undefined;
         entry.endTime = undefined;
     }
@@ -610,14 +667,14 @@ function startSubEntry(entry: Entry, name: string, settings: TempoSettings): voi
     entry.subEntries.push({ name: name, startTime: moment().toISOString() });
 }
 
-function startNewEntry(tracker: Tracker, name: string, settings: TempoSettings): void {
+function startNewEntry(tracker: Tracker, name: string, settings: TempoSettings, category?: string): void {
     if (!name) {
         name = formatNameTemplate(settings.segmentNameTemplate, tracker.entries.length + 1);
         // a hand-emptied template must not create unnamed segments
         if (!name)
             name = `Segment ${tracker.entries.length + 1}`;
     }
-    let entry: Entry = { name: name, startTime: moment().toISOString() };
+    let entry: Entry = { name: name, startTime: moment().toISOString(), category: category || undefined };
     tracker.entries.push(entry);
 }
 
@@ -792,42 +849,62 @@ function updateLegacyInfo(entries: Entry[]): void {
         if (entry.subEntries == null || !entry.subEntries.length)
             entry.subEntries = undefined;
 
+        // rich segment metadata is always normalized on load so hand-edited
+        // JSON and writes from newer versions stay well-formed
+        normalizeEntryMeta(entry);
+
         if (entry.subEntries)
             updateLegacyInfo(entry.subEntries);
     }
 }
 
 /**
- * Recursively generates a table section for the time tracker entries, maintaining the hierarchy
- * and indenting sub-entries with a dynamic prefix.
- *
- * @param entry - The current time tracker entry to process. It may contain nested sub-entries.
- * @param settings - The settings object for the Tempo, containing format options.
- * @param indent - The current indentation level, starting at 0 for top-level entries and increasing for sub-entries.
- *                 This value determines the prefix (e.g., "-", "--") added to sub-entry names.
+ * Recursively flattens one entry into export rows, maintaining the hierarchy
+ * via the indented label ("- ", "-- ", …). Each row carries the entry's OWN
+ * metadata — inheritance is a display/aggregation concept and duplicating
+ * ancestor values onto children would make exports noisy and lossy.
  */
-function createTableSection(entry: Entry, settings: TempoSettings, indent: number = 0): string[][] {
-    // Create dynamic prefix for sub-entries.
+interface ExportRow {
+    // indented display label ("- Part 2")
+    label: string;
+    category: string;
+    tags: string[];
+    note: string;
+    start: string;
+    end: string;
+    duration: string;
+}
+
+function exportRows(entry: Entry, settings: TempoSettings, indent: number = 0): ExportRow[] {
     const prefix = `${"-".repeat(indent)} `;
-
-    // Generate the table data.
-    let ret = [[
-        `${prefix}${entry.name}`, // Add prefix based on the indent level.
-        entry.startTime ? formatTimestamp(entry.startTime, settings) : "",
-        entry.endTime ? formatTimestamp(entry.endTime, settings) : "",
-        entry.endTime || entry.subEntries ? formatDuration(getDuration(entry), settings) : ""
-    ]];
-
-    // If sub-entries exist, add them recursively.
+    const ret: ExportRow[] = [{
+        label: `${prefix}${entry.name}`,
+        category: entry.category ?? "",
+        tags: entry.tags ?? [],
+        note: entry.note ?? "",
+        start: entry.startTime ? formatTimestamp(entry.startTime, settings) : "",
+        end: entry.endTime ? formatTimestamp(entry.endTime, settings) : "",
+        duration: entry.endTime || entry.subEntries ? formatDuration(getDuration(entry), settings) : ""
+    }];
     if (entry.subEntries) {
         for (let sub of orderedEntries(entry.subEntries, settings))
-            ret.push(...createTableSection(sub, settings, indent + 1));
+            ret.push(...exportRows(sub, settings, indent + 1));
     }
-
     return ret;
 }
 
-function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElement, indent: number, parentEntries: Entry[], displayIndex: number, ancestorsCollapsed: boolean): void {
+// metadata appended to the Segment column of the markdown table export, e.g.
+// `Work (Billing) #deep-work`. Compact on purpose: notes stay out of the table.
+function inlineMetaText(row: ExportRow): string {
+    let suffix = "";
+    if (row.category)
+        suffix += ` (${row.category})`;
+    for (const tag of row.tags)
+        suffix += ` #${tag}`;
+    return suffix;
+}
+
+function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElement, indent: number, parentEntries: Entry[], displayIndex: number, ancestors: Entry[], ancestorsCollapsed: boolean): void {
     const {app, tracker, newSegmentNameBox, runningEntry, runningPath, getFile, getSectionInfo, settings, component, liveCells, scheduleCollapseSave, visibility} = ctx;
     const entryRunning = entry === runningEntry;
     let row = table.createEl("tr");
@@ -841,15 +918,34 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
     if (entryRunning)
         row.addClass("tempo-row-running");
 
+    // effective metadata (category/tags/color resolve through inheritance; the
+    // row accent and chips re-render whenever a save rebuilds the table)
+    const colorToken = effectiveColorToken(entry, ancestors, settings.categories);
+    if (colorToken) {
+        row.style.setProperty("--tempo-row-color", colorVar(colorToken)!);
+        row.addClass("tempo-row-colored");
+    }
+
     // the depth indent lives on the wrap instead of the label so the drag
     // handle sits at the row start, clear of the tree-connector lines that
     // .tempo-subrow draws inside the indent space
     let nameField = new EditableField(row, 0, entry.name);
-    let nameWrap = nameField.cell.createDiv({ cls: "tempo-name-wrap" });
+    let nameCell = nameField.cell;
+    let nameWrap = nameCell.createDiv({ cls: "tempo-name-wrap" });
     nameWrap.style.marginLeft = indent ? `${indent * 1.4}em` : "0";
     let dragHandle = nameWrap.createSpan({ cls: "tempo-drag-handle", attr: {"aria-hidden": "true"} });
     setIcon(dragHandle, "grip-vertical");
+    if (colorToken) {
+        const colorDot = nameWrap.createSpan({ cls: "tempo-color-dot", attr: {"aria-hidden": "true"} });
+        colorDot.style.background = colorVar(colorToken)!;
+    }
     nameWrap.appendChild(nameField.label);
+    const ownNote = resolveNote(entry);
+    if (ownNote) {
+        let noteIcon = nameWrap.createSpan({cls: "tempo-note-icon", attr: {"aria-label": "Note", "tabindex": "0"}});
+        setIcon(noteIcon, "sticky-note");
+        attachNotePopover(app, noteIcon, ownNote, getFile, component, () => void openDetailsModal());
+    }
     let startField = new EditableTimestampField(row, entry.startTime!, settings);
     let endField = new EditableTimestampField(row, entry.endTime!, settings);
 
@@ -863,6 +959,67 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
     }
 
     void renderName(app, nameField.label, entry.name, getFile, component);
+
+    // second, quiet line under the name: category chip + up to N tag chips
+    renderMetaLine(nameCell, entry, ancestors, settings, indent);
+
+    // details modal: full metadata editing for one segment (name, category,
+    // color, tags, note); the caller's save writes the note back
+    async function openDetailsModal(): Promise<void> {
+        if (nameField.editing())
+            return;
+        // tell the editor which category (if any) an unset segment inherits,
+        // so it can show why the row displays a group
+        const inheritedCategory = resolveCategory(entry, ancestors);
+        const inherited = inheritedCategory && inheritedCategory.source !== entry
+            ? {name: inheritedCategory.value, sourceName: inheritedCategory.source.name}
+            : undefined;
+        const modal = new EntryDetailsModal(app, entry, {
+            categories: settings.categories,
+            suggestedTags: settings.suggestedTags,
+            treeTags: collectTreeTags(tracker.entries),
+            sourcePath: getFile(),
+            inherited,
+            onSaved: () => saveTracker(app, tracker, getFile(), getSectionInfo(), settings)
+        });
+        modal.open();
+    }
+
+    // actions shared by the row's context menu and the small-screen kebab;
+    // move up/down live only in menus (the drag handle covers desktop)
+    const entryMenuActions: EntryMenuActions = {
+        edit: () => void handleEdit(),
+        remove: async () => {
+            const confirmed = await showConfirm(app, "Are you sure you want to delete this entry?");
+            if (!confirmed)
+                return;
+            removeEntry(tracker.entries, entry);
+            await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        },
+        moveUp: () => {
+            if (moveEntryByOffset(tracker.entries, entry, -1, settings))
+                void saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        },
+        moveDown: () => {
+            if (moveEntryByOffset(tracker.entries, entry, 1, settings))
+                void saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
+        },
+        canMoveUp: displayIndex > 0,
+        canMoveDown: displayIndex >= 0 && displayIndex < parentEntries.length - 1
+    };
+
+    // right-click context menu with quick category/color/tag actions; text
+    // inputs keep their native paste menu
+    row.addEventListener("contextmenu", (e: MouseEvent) => {
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA"))
+            return;
+        e.preventDefault();
+        if (nameField.editing())
+            return;
+        showEntryMenu(app, e, entry, ancestors, settings, () => void openDetailsModal(),
+            () => void saveTracker(app, tracker, getFile(), getSectionInfo(), settings), entryMenuActions);
+    });
 
     let expandButton = new ButtonComponent(nameWrap)
         .setClass("clickable-icon")
@@ -897,26 +1054,6 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
 
     let entryButtons = row.createEl("td");
     entryButtons.addClass("tempo-table-buttons");
-    void new ButtonComponent(entryButtons)
-        .setClass("clickable-icon")
-        .setClass("tempo-action-move")
-        .setTooltip("Move up")
-        .setIcon("chevron-up")
-        .setDisabled(displayIndex <= 0)
-        .onClick(async () => {
-            if (moveEntryByOffset(tracker.entries, entry, -1, settings))
-                await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
-        });
-    void new ButtonComponent(entryButtons)
-        .setClass("clickable-icon")
-        .setClass("tempo-action-move")
-        .setTooltip("Move down")
-        .setIcon("chevron-down")
-        .setDisabled(displayIndex < 0 || displayIndex >= parentEntries.length - 1)
-        .onClick(async () => {
-            if (moveEntryByOffset(tracker.entries, entry, 1, settings))
-                await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
-        });
     let playButton = new ButtonComponent(entryButtons)
         .setClass("clickable-icon")
         .setClass("tempo-action-play")
@@ -942,6 +1079,15 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
         .setIcon("lucide-pencil")
         .onClick(async () => {
             await handleEdit();
+        });
+    void new ButtonComponent(entryButtons)
+        .setClass("clickable-icon")
+        .setClass("tempo-action-details")
+        .setTooltip("Details")
+        .setIcon("lucide-tags")
+        .onClick(async () => {
+            if (!nameField.editing())
+                await openDetailsModal();
         });
 
     // Add double-click to edit functionality
@@ -1017,12 +1163,24 @@ function addEditableTableRow(ctx: RowContext, entry: Entry, table: HTMLTableElem
             await saveTracker(app, tracker, getFile(), getSectionInfo(), settings);
         });
 
+    // overflow menu for small screens / touch: collapses the row actions
+    // into one button that opens the same menu as right-click
+    void new ButtonComponent(entryButtons)
+        .setClass("clickable-icon")
+        .setClass("tempo-action-kebab")
+        .setTooltip("More actions")
+        .setIcon("more-vertical")
+        .onClick((evt: MouseEvent) => {
+            showEntryMenu(app, evt, entry, ancestors, settings, () => void openDetailsModal(),
+                () => void saveTracker(app, tracker, getFile(), getSectionInfo(), settings), entryMenuActions);
+        });
+
     if (entry.subEntries) {
         // pass each child's sibling list and display position down so no row
         // ever searches the tree for its own context
         const ordered = orderedEntries(entry.subEntries, settings);
         for (let i = 0; i < ordered.length; i++)
-            addEditableTableRow(ctx, ordered[i]!, table, indent + 1, entry.subEntries, i, ancestorsCollapsed || !!entry.collapsed);
+            addEditableTableRow(ctx, ordered[i]!, table, indent + 1, entry.subEntries, i, [...ancestors, entry], ancestorsCollapsed || !!entry.collapsed);
     }
 }
 
@@ -1031,6 +1189,274 @@ function showConfirm(app: App, message: string): Promise<boolean> {
         const modal = new ConfirmModal(app, message, choice => resolve(choice === true));
         modal.open();
     });
+}
+
+// ---------------------------------------------------------------------------
+// Segment metadata: row chips, note popover, right-click menu
+// ---------------------------------------------------------------------------
+
+// Second, quiet line under a row's name: one category chip plus up to MAX_TAGS
+// tag chips (own tags always come first since resolveTags orders them that
+// way), collapsing the remainder into "+N". Rows without any metadata render
+// nothing, so plain trackers stay exactly as tidy as before.
+function renderMetaLine(cell: HTMLTableCellElement, entry: Entry, ancestors: Entry[], settings: TempoSettings, indent: number): void {
+    const category = resolveCategory(entry, ancestors);
+    const tags = resolveTags(entry, ancestors);
+    if (!category && tags.length === 0)
+        return;
+
+    const meta = cell.createDiv({cls: "tempo-meta"});
+    if (indent)
+        meta.style.marginLeft = `${indent * 1.4}em`;
+
+    if (category) {
+        const chip = meta.createSpan({cls: "tempo-chip tempo-cat-chip"});
+        const dot = chip.createSpan({cls: "tempo-chip-dot"});
+        const catColor = resolveCategoryColor(category.value, settings.categories);
+        if (catColor)
+            dot.style.background = colorVar(catColor)!;
+        chip.createSpan({cls: "tempo-chip-text", text: category.value});
+        if (category.source !== entry)
+            chip.setAttr("title", `Category inherited from “${category.source.name}”`);
+    }
+
+    const maxShown = 3;
+    for (let i = 0; i < tags.length && i < maxShown; i++) {
+        const owned = tags[i]!;
+        const chip = meta.createSpan({cls: "tempo-chip tempo-tag-chip"});
+        chip.createSpan({cls: "tempo-chip-text", text: `#${owned.tag}`});
+        if (owned.source !== entry) {
+            chip.addClass("is-inherited");
+            chip.setAttr("title", `Tag from “${owned.source.name}”`);
+        }
+    }
+    if (tags.length > maxShown) {
+        const rest = tags.slice(maxShown);
+        const more = meta.createSpan({cls: "tempo-chip tempo-more-chip", text: `+${rest.length}`});
+        more.setAttr("title", rest.map(t => `#${t.tag}`).join("  "));
+    }
+}
+
+// markdown node cache for notes, keyed by note text (mirrors nameRenderCache)
+const noteRenderCache = new Map<string, Node[]>();
+
+async function renderNoteNodes(app: App, note: string, getFile: GetFile, component: Component): Promise<Node[]> {
+    let nodes = noteRenderCache.get(note);
+    if (!nodes) {
+        const temp = createSpan();
+        await MarkdownRenderer.render(app, note, temp, getFile(), component);
+        nodes = temp.hasChildNodes() ? Array.from(temp.childNodes) : [];
+        noteRenderCache.set(note, nodes);
+    }
+    return nodes;
+}
+
+const NOTE_POPOVER_SHOW_DELAY = 250;
+const NOTE_POPOVER_HIDE_DELAY = 200;
+
+// Working hover tooltip for a segment's note: hidden until the pointer
+// rests on the sticky-note icon, stays open while the pointer is inside
+// it (so links and long notes are usable), and hides shortly after the
+// pointer leaves both. Clicking the icon opens the details editor instead.
+// The popover lives inside the table wrapper so it is torn down with the
+// block on re-render, and is positioned absolutely against that wrapper.
+function attachNotePopover(app: App, anchor: HTMLElement, note: string, getFile: GetFile, component: Component, onEdit: () => void): void {
+    const wrap = anchor.closest<HTMLElement>(".tempo-table-wrap");
+    if (!wrap) {
+        // no table wrapper (unlikely): degrade to a plain-text title tooltip
+        anchor.setAttr("title", note.length > 300 ? `${note.slice(0, 300)}…` : note);
+        return;
+    }
+    const pop = wrap.createDiv({cls: "tempo-note-pop"});
+    const body = pop.createDiv({cls: "tempo-note-pop-body"});
+    let overAnchor = false;
+    let overPop = false;
+    let hideTimer: number | undefined;
+    let showTimer: number | undefined;
+
+    const place = (): void => {
+        const iconR = anchor.getBoundingClientRect();
+        const wrapR = wrap.getBoundingClientRect();
+        const dims = pop.getBoundingClientRect();
+        let top = iconR.bottom - wrapR.top + 5;
+        let left = iconR.left - wrapR.left;
+        if (top + dims.height > wrapR.height - 4)
+            top = Math.max(0, iconR.top - wrapR.top - dims.height - 5);
+        left = Math.max(0, Math.min(left, wrapR.width - dims.width - 8));
+        pop.style.top = `${top}px`;
+        pop.style.left = `${left}px`;
+    };
+
+    const sync = (): void => {
+        const visible = overAnchor || overPop;
+        if (visible) {
+            pop.addClass("is-visible");
+            void renderNoteNodes(app, note, getFile, component).then(nodes => {
+                if (!(overAnchor || overPop))
+                    return;
+                body.empty();
+                body.append(...nodes.map(n => n.cloneNode(true)));
+                place();
+            });
+        } else {
+            pop.removeClass("is-visible");
+        }
+    };
+
+    // hide on a short delay so moving from the icon into the popover does
+    // not close it; cancel pending hides/shows on every state change
+    const scheduleHide = (): void => {
+        window.clearTimeout(hideTimer);
+        hideTimer = window.setTimeout(() => {
+            hideTimer = undefined;
+            if (!overAnchor && !overPop) {
+                overAnchor = false;
+                overPop = false;
+                sync();
+            }
+        }, NOTE_POPOVER_HIDE_DELAY);
+    };
+
+    const scheduleShow = (): void => {
+        window.clearTimeout(showTimer);
+        showTimer = window.setTimeout(() => {
+            showTimer = undefined;
+            sync();
+        }, NOTE_POPOVER_SHOW_DELAY);
+    };
+
+    anchor.addEventListener("mouseenter", () => {
+        overAnchor = true;
+        window.clearTimeout(hideTimer);
+        scheduleShow();
+    });
+    anchor.addEventListener("mouseleave", () => {
+        overAnchor = false;
+        window.clearTimeout(showTimer);
+        if (overPop) {
+            scheduleHide();
+            return;
+        }
+        sync();
+    });
+    pop.addEventListener("mouseenter", () => {
+        overPop = true;
+        window.clearTimeout(hideTimer);
+    });
+    pop.addEventListener("mouseleave", () => {
+        overPop = false;
+        window.clearTimeout(showTimer);
+        scheduleHide();
+    });
+    anchor.addEventListener("focus", () => {
+        overAnchor = true;
+        sync();
+    });
+    anchor.addEventListener("blur", () => {
+        overAnchor = false;
+        sync();
+    });
+    // click keeps its editor role: the tooltip is for reading, the dialog
+    // is for editing
+    anchor.addEventListener("click", (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onEdit();
+    });
+}
+
+// Right-click menu for one row: full details plus quick category/color actions
+// that mutate the entry and let the caller persist. Color uses a swatch
+// popover, category a nested menu re-shown at the same position. ExtraActions
+// adds the structural row commands (edit/delete/move) so the same menu also
+// serves the small-screen kebab, where no inline buttons exist for them.
+interface EntryMenuActions {
+    edit: () => void;
+    remove: () => Promise<void>;
+    moveUp: () => void;
+    moveDown: () => void;
+    canMoveUp: boolean;
+    canMoveDown: boolean;
+}
+
+function showEntryMenu(app: App, evt: MouseEvent, entry: Entry, ancestors: Entry[], settings: TempoSettings, openDetails: () => void, onSaved: () => void, actions?: EntryMenuActions): void {
+    const at = {x: evt.clientX, y: evt.clientY};
+    const menu = new Menu();
+
+    if (actions) {
+        menu.addItem(item => {
+            item.setTitle("Move up").setIcon("chevron-up").setDisabled(!actions.canMoveUp);
+            item.onClick(() => actions.moveUp());
+        });
+        menu.addItem(item => {
+            item.setTitle("Move down").setIcon("chevron-down").setDisabled(!actions.canMoveDown);
+            item.onClick(() => actions.moveDown());
+        });
+        menu.addSeparator();
+    }
+    menu.addItem(item => {
+        item.setTitle("Edit details").setIcon("tags");
+        item.onClick(() => openDetails());
+    });
+    menu.addSeparator();
+    menu.addItem(item => {
+        item.setTitle("Set color…").setIcon("palette");
+        item.onClick(() => {
+            showColorPopover({clientX: at.x, clientY: at.y}, entry.color, token => {
+                entry.color = token;
+                onSaved();
+            });
+        });
+    });
+    if (entry.color) {
+        menu.addItem(item => {
+            item.setTitle("Clear color").setIcon("rotate-ccw");
+            item.onClick(() => {
+                entry.color = undefined;
+                onSaved();
+            });
+        });
+    }
+    // what the row currently shows (own value, or an ancestor's when unset);
+    // picking "No category" stores null so the removal also wins over an
+    // inherited category
+    const effective = resolveCategory(entry, ancestors);
+    menu.addItem(item => {
+        item.setTitle("Set category…").setIcon("folder");
+        item.onClick(() => {
+            const sub = new Menu();
+            const apply = (name: string): void => {
+                entry.category = name || null;
+                onSaved();
+            };
+            sub.addItem(subItem => {
+                subItem.setTitle("No category").setChecked(!effective);
+                subItem.onClick(() => apply(""));
+            });
+            for (const category of settings.categories) {
+                const isCurrent = effective?.value === category.name;
+                sub.addItem(subItem => {
+                    subItem.setTitle(category.name).setChecked(isCurrent);
+                    subItem.onClick(() => apply(category.name));
+                });
+            }
+            sub.showAtPosition(at);
+        });
+    });
+
+    if (actions) {
+        menu.addSeparator();
+        menu.addItem(item => {
+            item.setTitle("Edit").setIcon("pencil");
+            item.onClick(() => actions.edit());
+        });
+        menu.addItem(item => {
+            item.setTitle("Remove").setIcon("trash");
+            item.onClick(() => actions.remove());
+        });
+    }
+
+    menu.showAtMouseEvent(evt);
 }
 
 // characters that can start a markdown/HTML construct in Obsidian. Names with
